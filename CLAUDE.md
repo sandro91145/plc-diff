@@ -53,7 +53,7 @@ very deep — keep paths and drawings robust for that.
 | S7-GRAPH | `parse_graph_sequence`, `graph_summary`, `graph_links` (structure with branches resolved), `compare_graph`, `graph_svg` (layered layout: rank = longest path, column by DFS; branch bars; jumps as ↓S#), `html_graph_net` (chain before/after + changed conditions drawn as FBD) |
 | Report | `print_report` (terminal), `build_html` (compare page: TOC, SAFETY badges, safety bar, networks before/after, "Logic as text", sign-off sheet, print CSS / "Print / save as PDF") |
 | Git | `git()`, `rev_ok`, `rev_desc`, `changed_files` (rename limit raised; **pure moves R100 skipped**, counted in `moves`), `read_rev` (WORK = files on disk); `blocks_at` (exports that existed in a version), `restore_block` (write one
-export back into the workspace, or a copy elsewhere); `NOWIN` hides console windows on Windows; `ensure_git_on_path` |
+export back into the workspace, or a copy elsewhere), `workspace_path` (where an export from an older version belongs in today's PLC folder); `NOWIN` hides console windows on Windows; `ensure_git_on_path` |
 | PLCs | `plcdiff.json` (`plcs: [{name, path, was?}]`), `plc_map`, `plc_prefixes` (current + earlier folders so history survives a move; inferred for exports that used to sit directly in `vci/`), `list_plcs`, `plc_of`, `plc_paths` (adds `:(exclude)` for nested PLC folders) |
 | History DB | `update_history` (incremental over `git log --first-parent`, removes rewritten commits), `rows_for_report`, `history_rows` (adds `plc`, `safety`), `write_csv` (`;` + BOM for Portuguese Excel), `build_history_html` (search/filters + charts in plain SVG/JS), `install_hook` (post-commit hook) |
 | App | settings, `run()`, `find_doubled`/`merge_up` (TIA doubled-folder fix), `compute_reports`, `suggest_message`, `repo_info`, `project_summary`, `scan_for_projects`, `create_project`, `init_repo`, `pull` (rebase+autostash, clean abort on conflict), `push` (auto-pull-and-retry), `clone`, `health_check`/`build_health_html`, `pick_folder`/`pick_file` (tkinter in a subprocess), `APP_CSS`/`APP_JS`/`APP_HTML`, `run_app` (HTTP server, token in header for /api, `?t=` for /view, Host check, 60 s idle shutdown, instance file, restart) |
@@ -112,12 +112,14 @@ blocks,restoreblock,explore,quit,restart}`.
 - Charts shifted a day in Europe time zones → dates handled in UTC in JS.
 - A commit that moves 1,000+ files made Compare hang → rename limit raised, pure moves skipped, page explains it.
 - Compare across a folder move lost history for a single PLC → `plc_prefixes` / `was`.
+- Getting a block back from before a PLC folder move wrote it to the old folder, where TIA never looks →
+  `workspace_path` maps it into today's folder (tested for inferred and `was` moves).
 - Iframe height in CSS grid (150 px default) → `grid-template-rows:minmax(0,1fr)` + `height:100%`.
 
 
 ## 8. How we test
 
-- **`python tests/smoke.py` runs the whole checklist below in one go** (37 checks, ~20 s): both files compile,
+- **`python tests/smoke.py` runs the whole checklist below in one go** (46 checks, ~20 s): both files compile,
   a throwaway Git repo is built from the samples, the compare finds every kind of change (tag, interface, contact,
   box pin, call parameter, negated input, added/removed network), the HTML page really contains drawings and print
   CSS, `--files` / `--work` / `--history` work, the CSV has the BOM and `;` Excel needs, and the app itself starts,
