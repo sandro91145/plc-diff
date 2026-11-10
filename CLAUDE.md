@@ -116,6 +116,13 @@ explore,quit,restart}`.
 
 ## 8. How we test
 
+- **`python tests/smoke.py` runs the whole checklist below in one go** (~30 checks, ~20 s): both files compile,
+  a throwaway Git repo is built from the samples, the compare finds every kind of change (tag, interface, contact,
+  box pin, call parameter, negated input, added/removed network), the HTML page really contains drawings and print
+  CSS, `--files` / `--work` / `--history` work, the CSV has the BOM and `;` Excel needs, and the app itself starts,
+  answers `/api/ping` + `/api/state`, draws the report page, refuses an `/api` call without a token and quits.
+  It never writes in a real project (temp folder, its own `APPDATA`) and never changes `PLCDiff.pyw`.
+  `--keep` leaves the throwaway repo for poking at by hand; `--no-app` skips the server part.
 - `make_samples.py <dir> old|new` writes realistic V20 exports (LAD with branches/TON/FB call/compare, FBD with
   gates and a negated call input, tag table) for two versions; build a throwaway git repo with them.
 - S7-GRAPH: export a real GRAPH FB, edit a copy (rename a step, change a time/action/condition/jump) and run
@@ -123,7 +130,7 @@ explore,quit,restart}`.
 - Team flow tested with a bare repo + two app instances (different `APPDATA`, ports): concurrent pushes, conflict,
   Keep mine / Use theirs.
 - Screenshots via Playwright for checking and for the guide (paths masked to `D:\...`).
-- After any change: `python -m py_compile`, run a CLI compare, open the app, look at the page.
+- After any change: `python tests/smoke.py`, then open the app and look at the real page.
 
 
 ## 9. Known limits / ideas not done yet
@@ -140,3 +147,19 @@ explore,quit,restart}`.
 - The users are PLC programmers, not software developers: plain, short English in the UI; the app should do things
   itself (buttons) rather than ask for command lines.
 - Keep it one file and standard library only. Check every change visually (screenshots of the real page).
+
+
+## 11. Working agreements (for AI assistants)
+
+- **This app is in daily use on real machines.** Change only what the task asks for. Don't refactor, rename or
+  "tidy" `PLCDiff.pyw` on the side, and don't add a dependency.
+- **Prove it before you say it works**: `python tests/smoke.py` (paste the result), plus a screenshot of the real
+  page for anything visual. Never make a check pass by weakening the check.
+- Bump `VERSION` for user-visible changes, note them in `README.md`, and keep the sections of this file true
+  (code map, format notes, pitfalls, limits). The separate step-by-step user guide needs a new screenshot and a
+  Changelog row whenever the UI changes.
+- **This repository is public.** Machine paths, customer names, colleague names, project or device names and
+  anything else site-specific stay out of it — they belong in `CLAUDE.local.md` (git-ignored, loaded automatically
+  next to this file) or in the chat.
+- Ready-made workflows live in `.claude/commands/`: `/check` (run the smoke test), `/block <export.xml>` (make the
+  app handle an export it can't draw yet), `/ship` (check → version → docs → commit → push).

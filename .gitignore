@@ -1,3 +1,7 @@
 __pycache__/
 *.pyc
 .plcdiff/
+
+# personal notes for Claude Code (machine paths, customer and colleague names) - never committed
+CLAUDE.local.md
+.claude/settings.local.json
