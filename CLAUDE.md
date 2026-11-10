@@ -140,6 +140,8 @@ explore,quit,restart}`.
 - Possible next: "Compare two folders" without Git; restore an old block version (write it back for *Import from
   workspace*); "where is this tag used" search; review sign-off per commit; shared network install with auto-update.
 - **Setup → Check all blocks** lists every export the app can't fully draw yet — the best source of new work.
+  As of 1.0.1 it comes back clean on a real project of ~1,250 exports (mostly FBD, with F_FBD safety blocks and
+  S7-GRAPH sequences), so today's gaps are missing features, not parsing. Run it again after a big TIA export.
 
 
 ## 10. Style
