@@ -119,7 +119,7 @@ blocks,restoreblock,explore,quit,restart}`.
 
 ## 8. How we test
 
-- **`python tests/smoke.py` runs the whole checklist below in one go** (46 checks, ~20 s): both files compile,
+- **`python tests/smoke.py` runs the whole checklist below in one go** (48 checks, ~20 s): both files compile,
   a throwaway Git repo is built from the samples, the compare finds every kind of change (tag, interface, contact,
   box pin, call parameter, negated input, added/removed network), the HTML page really contains drawings and print
   CSS, `--files` / `--work` / `--history` work, the CSV has the BOM and `;` Excel needs, and the app itself starts,

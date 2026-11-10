@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 
-VERSION = "1.1.1"
+VERSION = "1.1.2"
 WORK = "<work>"          # marker for "files on disk"
 TEXT_EXT = {".scl", ".stl", ".awl", ".db", ".udt", ".s7dcl", ".s7res", ".txt", ".csv", ".md"}
 GATES = ("or", "and")
@@ -2276,7 +2276,9 @@ def blocks_at(root, rev, paths):
 def workspace_path(root, plc, rel):
     """Where an export from any version belongs in the workspace now. A PLC folder may have moved since that
     version (see plc_prefixes): an export from an earlier folder goes to the same place in the current one."""
-    pref = plc_prefixes(root).get(plc) if plc else None
+    prefixes = plc_prefixes(root)
+    plc = plc or plc_of(rel, prefixes)                      # "All PLCs": find the PLC the file belongs to
+    pref = prefixes.get(plc) if plc else None
     if not pref:
         return rel
     base = "" if pref[0] == "." else pref[0].rstrip("/") + "/"
@@ -3331,9 +3333,10 @@ border-radius:8px;padding:7px 13px;cursor:pointer;white-space:nowrap}
 .btn.hot{background:#f59e0b;border-color:#f59e0b;color:#111}
 .newver{background:#fef3c7;color:#78350f;padding:8px 20px;display:flex;gap:12px;align-items:center;font-weight:600;font-size:13px;flex:none}
 .plcsel{font:600 13px "Segoe UI",system-ui,sans-serif;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:8px;padding:7px 10px;max-width:240px}
-.plcs{display:grid;gap:8px;margin:6px 0 12px}
+.plcs{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin:6px 0 12px}
 .plcrow{display:flex;gap:10px;align-items:center;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:8px 12px}
-.plcrow b{min-width:140px}.plcrow code{flex:1;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plcrow b{min-width:140px;overflow-wrap:anywhere}.plcrow code{flex:1;min-width:0;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.plcrow code.tail{direction:rtl;text-align:left}.plcrow .btn{flex-shrink:0}
 .plcrow.on{border-color:var(--accent);background:#ecfeff}
 .people{font:12.5px Consolas,monospace;color:var(--ink);background:#f8fafc;border-radius:8px;padding:8px 10px;white-space:pre}
 ol.steps{margin:6px 0 0;padding-left:20px;color:var(--ink);font-size:13px}ol.steps li{margin:4px 0}
@@ -3832,8 +3835,9 @@ function filterBlocks(){
   const q = ($('#res-find').value || '').trim().toLowerCase();
   const rows = BLOCKS.filter(b => !q || b.name.toLowerCase().includes(q) || b.path.toLowerCase().includes(q));
   if (!rows.length) return $('#res-list').innerHTML = '<div class="hint">No block matches that.</div>';
-  $('#res-list').innerHTML = rows.slice(0, 200).map(b => { const j = esc(JSON.stringify(b.path)), d = b.dest || b.path;
-    return `<div class="plcrow"><b>${esc(b.name)}</b><code title="${esc(d)}">${esc(d)}</code>
+  $('#res-list').innerHTML = rows.slice(0, 200).map(b => { const j = esc(JSON.stringify(b.path)), d = b.dest || b.path,
+        dir = d.includes('/') ? d.slice(0, d.lastIndexOf('/') + 1) : d;
+    return `<div class="plcrow"><b>${esc(b.name)}</b><code class="tail" title="${esc(d)}"><span dir="ltr">${esc(dir)}</span></code>
       <button class="btn warn" onclick='restoreBlock(${j}, this)'>Put it back</button>
       <button class="btn" onclick='restoreBlock(${j}, this, true)'>Save a copy…</button></div>`; }).join('') +
     (rows.length > 200 ? `<div class="hint">… and ${rows.length - 200} more. Type a few letters to narrow it down.</div>` : '');
