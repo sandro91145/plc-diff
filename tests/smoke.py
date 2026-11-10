@@ -233,6 +233,9 @@ def check_app(repo, tmp):
         st, j = post("/api/blocks", {"rev": "HEAD~1"})
         names = [b["name"] for b in j.get("blocks", [])]
         say(st == 200 and "FC_Station" in names, "/api/blocks lists the blocks of an older version", str(j)[:200])
+        fcs = next((b for b in j.get("blocks", []) if b["name"] == "FC_Station"), {})
+        say(fcs.get("group") == "Program blocks" and fcs.get("sub") == "Station",
+            "/api/blocks says which TIA folder each block is in", str(fcs)[:200])
         rel = next((b["path"] for b in j.get("blocks", []) if b["name"] == "FC_Station"), "")
         st, j = post("/api/restoreblock", {"rev": "HEAD~1", "path": rel})
         say(st == 200 and j.get("ok"), "the old version is put back into the workspace", str(j)[:200])
@@ -308,6 +311,8 @@ def check_moved_plc(tmp):
         dest = pd.workspace_path(root, "PLC_1", rel)
         say(dest == "vci/PLC_1/Program blocks/Station/FC_Station.xml",
             "%s: it goes back into today's PLC folder" % case, dest)
+        anyplc = pd.workspace_path(root, "", rel)
+        say(anyplc == dest, "%s: also with All PLCs selected" % case, anyplc)
         out = pd.restore_block(root, first, rel, dest_rel=dest)
         say(Path(out) == root / dest and not (root / rel).exists(),
             "%s: no file is written to the old folder" % case, str(out))
