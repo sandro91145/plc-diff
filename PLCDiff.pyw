@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 
-VERSION = "1.1.2"
+VERSION = "1.2.0"
 WORK = "<work>"          # marker for "files on disk"
 TEXT_EXT = {".scl", ".stl", ".awl", ".db", ".udt", ".s7dcl", ".s7res", ".txt", ".csv", ".md"}
 GATES = ("or", "and")
@@ -2293,6 +2293,17 @@ def workspace_path(root, plc, rel):
     return rel
 
 
+def export_place(rel, prefixes=None):
+    """(PLC, TIA folder, sub-folder) of an export, for grouping lists:
+    "vci/PLC_1/Program blocks/Station/FC_Station.xml" -> ("PLC_1", "Program blocks", "Station")."""
+    parts = rel.split("/")
+    i = next((k for k, p in enumerate(parts[:-1]) if p.lower() in TIA_FOLDERS), None)
+    plc = plc_of(rel, prefixes) if prefixes else ""
+    if i is None:
+        return plc, "Other files", "/".join(parts[:-1])
+    return plc, parts[i], "/".join(parts[i + 1:-1])
+
+
 def restore_block(root, rev, rel, dest_dir=None, dest_rel=None):
     """Write one export as it was in `rev` back into the workspace at dest_rel (default: where it was then),
     or into dest_dir. Returns the file written."""
@@ -3337,6 +3348,7 @@ border-radius:8px;padding:7px 13px;cursor:pointer;white-space:nowrap}
 .plcrow{display:flex;gap:10px;align-items:center;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:8px 12px}
 .plcrow b{min-width:140px;overflow-wrap:anywhere}.plcrow code{flex:1;min-width:0;font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .plcrow code.tail{direction:rtl;text-align:left}.plcrow .btn{flex-shrink:0}
+.resgrp{border:1px solid var(--line);border-radius:10px;background:#fff}.resgrp>summary{cursor:pointer;padding:10px 14px;font-size:14px}.resgrp>summary span{color:var(--muted);font-size:12px;margin-left:8px}.resgrp>.plcs{margin:0 10px 10px}
 .plcrow.on{border-color:var(--accent);background:#ecfeff}
 .people{font:12.5px Consolas,monospace;color:var(--ink);background:#f8fafc;border-radius:8px;padding:8px 10px;white-space:pre}
 ol.steps{margin:6px 0 0;padding-left:20px;color:var(--ink);font-size:13px}ol.steps li{margin:4px 0}
@@ -3830,18 +3842,32 @@ async function loadBlocks(){
   BLOCKS = j.blocks || [];
   filterBlocks();
 }
+const RES_ORDER = ['program blocks', 'plc tags', 'plc data types', 'watch and force tables', 'technology objects', 'external source files'];
+const RES_OPEN = new Set();
 function filterBlocks(){
   if (!BLOCKS.length) return $('#res-list').innerHTML = '<div class="hint">No exports in that version.</div>';
   const q = ($('#res-find').value || '').trim().toLowerCase();
-  const rows = BLOCKS.filter(b => !q || b.name.toLowerCase().includes(q) || b.path.toLowerCase().includes(q));
+  const rows = BLOCKS.filter(b => !q || b.name.toLowerCase().includes(q) || (b.dest || b.path).toLowerCase().includes(q));
   if (!rows.length) return $('#res-list').innerHTML = '<div class="hint">No block matches that.</div>';
-  $('#res-list').innerHTML = rows.slice(0, 200).map(b => { const j = esc(JSON.stringify(b.path)), d = b.dest || b.path,
-        dir = d.includes('/') ? d.slice(0, d.lastIndexOf('/') + 1) : d;
-    return `<div class="plcrow"><b>${esc(b.name)}</b><code class="tail" title="${esc(d)}"><span dir="ltr">${esc(dir)}</span></code>
-      <button class="btn warn" onclick='restoreBlock(${j}, this)'>Put it back</button>
-      <button class="btn" onclick='restoreBlock(${j}, this, true)'>Save a copy…</button></div>`; }).join('') +
-    (rows.length > 200 ? `<div class="hint">… and ${rows.length - 200} more. Type a few letters to narrow it down.</div>` : '');
+  const multi = new Set(rows.map(b => b.plc || '')).size > 1, groups = new Map();
+  for (const b of rows){
+    const k = (multi ? (b.plc || 'Other') + ' · ' : '') + (b.group || 'Other files');
+    if (!groups.has(k)) groups.set(k, {plc: b.plc || '', group: b.group || 'Other files', rows: []});
+    groups.get(k).rows.push(b);
+  }
+  const rank = g => { const i = RES_ORDER.indexOf(g.toLowerCase()); return i < 0 ? 99 : i; };
+  const keys = [...groups.keys()].sort((a, b) => { const x = groups.get(a), y = groups.get(b);
+    return x.plc.localeCompare(y.plc) || rank(x.group) - rank(y.group) || x.group.localeCompare(y.group); });
+  const openAll = !!q || keys.length === 1;
+  $('#res-list').innerHTML = keys.map(k => { const g = groups.get(k), n = g.rows.length;
+    const items = g.rows.map(b => { const j = esc(JSON.stringify(b.path)), d = b.dest || b.path;
+      return `<div class="plcrow"><b>${esc(b.name)}</b><code class="tail" title="${esc(d)}"><span dir="ltr">${esc(b.sub ? b.sub + '/' : '')}</span></code>
+        <button class="btn warn" onclick='restoreBlock(${j}, this)'>Put it back</button>
+        <button class="btn" onclick='restoreBlock(${j}, this, true)'>Save a copy…</button></div>`; }).join('');
+    return `<details class="resgrp" data-k="${esc(k)}" ontoggle="resToggle(this)"${openAll || RES_OPEN.has(k) ? ' open' : ''}>
+      <summary><b>${esc(k)}</b><span>${n} ${n === 1 ? 'export' : 'exports'}</span></summary><div class="plcs">${items}</div></details>`; }).join('');
 }
+function resToggle(el){ if ($('#res-find').value.trim()) return; el.open ? RES_OPEN.add(el.dataset.k) : RES_OPEN.delete(el.dataset.k); }
 async function restoreBlock(path, btn, copy, force){
   const rev = $('#res-rev').value, label = ($('#res-rev').selectedOptions[0] || {}).textContent || rev;
   const dest = ((BLOCKS.find(b => b.path === path) || {}).dest) || path;
@@ -4332,8 +4358,12 @@ def run_app(port=0, open_browser=True):
             if not rev_ok(root, rev):
                 return {"error": "That version is not in this project (any more)."}
             plc = cur_plc()
-            return {"plc": plc, "blocks": [{"path": p, "name": n, "dest": workspace_path(root, plc, p)}
-                                           for p, n in blocks_at(root, rev, plc_paths(plc, root))]}
+            prefixes, out = plc_prefixes(root), []
+            for p, n in blocks_at(root, rev, plc_paths(plc, root)):
+                dest = workspace_path(root, plc, p)
+                bplc, group, sub = export_place(dest, prefixes)
+                out.append({"path": p, "name": n, "dest": dest, "plc": bplc, "group": group, "sub": sub})
+            return {"plc": plc, "blocks": out}
         if path == "/api/restoreblock":
             rev = str(body.get("rev") or "").strip()
             rel = str(body.get("path") or "").strip()
