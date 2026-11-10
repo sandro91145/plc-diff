@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
 WORK = "<work>"          # marker for "files on disk"
 TEXT_EXT = {".scl", ".stl", ".awl", ".db", ".udt", ".s7dcl", ".s7res", ".txt", ".csv", ".md"}
 GATES = ("or", "and")
@@ -1731,7 +1731,7 @@ def compare_graph(o, n):
 def graph_svg(g, marks):
     if not g["steps"] and not g["trans"]:
         return '<div class="empty">empty sequence</div>'
-    CW, STEP_W, STEP_H, TR_H, BR_H, GAP = 300, 236, 42, 40, 14, 14
+    COLW, STEP_W, STEP_H, TR_H, BR_H, GAP = 400, 236, 42, 40, 14, 14   # a transition's text never reaches the next column's step
     nodes = list(g["steps"]) + list(g["trans"]) + list(g["branches"])
     succ, pred = defaultdict(list), defaultdict(list)
     for a, ap, b, bp in g["edges"]:
@@ -1789,8 +1789,8 @@ def graph_svg(g, marks):
         jumps[a].append(b)
     H = y + 14
     ncol = max(col.values()) + 1
-    W = ncol * CW + 230
-    X = lambda n: 24 + STEP_W / 2 + col[n] * CW
+    W = ncol * COLW + 230
+    X = lambda n: 24 + STEP_W / 2 + col[n] * COLW
     top = lambda n: ry[rank[n]] + (rh[rank[n]] - height(n)) / 2
     bot = lambda n: top(n) + height(n)
     s = []
@@ -1854,7 +1854,7 @@ def graph_svg(g, marks):
         mark = marks.get(tid)
         lab = "%s %s" % (tid, tr["name"])
         cond = tr["txt"] or "(no condition)"
-        tw_ = max(tw(trunc(lab, 34)) * 1.05, tw(trunc(cond, 44))) + 34
+        tw_ = min(max(tw(trunc(lab, 36)) * 1.05, tw(trunc(cond, 40))) + 34, COLW - STEP_W / 2 - 12)
         if mark:
             stc, fill = HL[mark]
             s.append('<rect x="%.1f" y="%.1f" width="%.1f" height="%d" rx="6" fill="%s" stroke="%s" stroke-width="1.5"/>' % (
@@ -1863,8 +1863,8 @@ def graph_svg(g, marks):
             pass
         s.append('<path class="w" d="M%.1f %.1f V%.1f" />' % (x, t, t + TR_H))
         s.append('<path class="w" d="M%.1f %.1f H%.1f" style="stroke-width:3"/>' % (x - 12, yc, x + 12))
-        s.append(text(x + 18, yc - 3, trunc(lab, 34), "tb", "start", full=lab))
-        s.append(text(x + 18, yc + 11, trunc(cond, 44), "tm", "start", full=cond))
+        s.append(text(x + 18, yc - 3, trunc(lab, 36), "tb", "start", full=lab))
+        s.append(text(x + 18, yc + 11, trunc(cond, 40), "tm", "start", full=cond))
         for j in jumps.get(tid, []):
             s.append('<path class="w" d="M%.1f %.1f V%.1f M%.1f %.1f L%.1f %.1f L%.1f %.1f"/>' % (
                 x, t + TR_H, t + TR_H + 10, x - 4, t + TR_H + 5, x, t + TR_H + 10, x + 4, t + TR_H + 5))
@@ -2032,8 +2032,9 @@ def html_net(nd, meta):
     st = nd.status
     badge = {"same": "unchanged", "changed": "changed", "added": "added", "removed": "removed"}[st]
     head = "Network %d" % net.idx if net.graph is None else "GRAPH"
-    h = ['<section class="net %s"><div class="nh"><span class="badge %s">%s</span><b>%s</b>%s</div>' % (
-        st, st, badge, head, '<span class="nt">%s</span>' % esc(net.title) if net.title else "")]
+    badge = "" if meta.get("block_view") else '<span class="badge %s">%s</span>' % (st, badge)
+    h = ['<section class="net %s"><div class="nh">%s<b>%s</b>%s</div>' % (
+        st, badge, head, '<span class="nt">%s</span>' % esc(net.title) if net.title else "")]
     h.append(html_bullets([b for b in nd.bullets if not (st in ("added", "removed") and b[1].startswith("network"))]))
     if net.graph is not None:
         if st == "added":
@@ -2041,7 +2042,10 @@ def html_net(nd, meta):
         if st == "removed":
             nd.marks_old = {k: "del" for k in list(net.graph["steps"]) + list(net.graph["trans"])}
         h.append(html_graph_net(nd, meta))
-        if st != "same":
+        if st == "same" and meta.get("block_view"):
+            h.append("<details><summary>Sequence as text</summary>%s</details>" % html_codediff(
+                ["  " + l for l in nd.new.statements]))
+        elif st != "same":
             lines = [l for l in difflib.ndiff(nd.old.statements if nd.old else [], nd.new.statements if nd.new else [])
                      if not l.startswith("?")]
             h.append("<details><summary>Sequence as text</summary>%s</details>" % html_codediff(
@@ -2072,6 +2076,39 @@ def html_net(nd, meta):
         h.append("<details><summary>Logic as text</summary>%s</details>" % html_codediff(
             [("+" if l[0] == "+" else "-" if l[0] == "-" else " ") + " " + l[2:] for l in lines]))
     h.append("</section>")
+    return "".join(h)
+
+
+def build_block_html(meta, rep):
+    """One block as it is in one version, every network drawn - for looking at it, not comparing."""
+    doc = rep.new
+    nm = doc.name if doc else Path(rep.path).stem
+    h = ['<!doctype html><html lang="en"><head><meta charset="utf-8">'
+         '<meta name="viewport" content="width=device-width,initial-scale=1">'
+         '<title>PLC Diff · %s</title><style>%s</style></head><body>' % (esc(nm), CSS)]
+    h.append('<header><button class="printbtn" onclick="window.print()">Print / save as PDF</button>'
+             '<div class="brand">PLC Diff · block</div><h1>%s</h1><div class="range"><span class="rev"><code>%s</code>%s</span>'
+             '</div></header><main>' % (esc(nm), esc(meta["new_short"]), esc(meta["new_desc"])))
+    h.append('<article class="file%s"><div class="fh"><h2>%s</h2>%s<span class="kind">%s</span><span class="path">%s</span></div>'
+             '<div class="fbody">' % (" safety" if rep.safety else "", esc(nm),
+                                      '<span class="sbadge">SAFETY</span>' if rep.safety else "",
+                                      esc(doc.heading() if doc else ""), esc(rep.path)))
+    if rep.error or not doc:
+        h.append('<div class="err">Couldn\'t read this export fully (%s).</div>' % esc(rep.error or "unknown format"))
+    elif doc.kind == "code":
+        if not rep.nets:
+            h.append('<div class="nothing">This block has no networks.</div>')
+        for nd in rep.nets:
+            h.append(html_net(nd, meta))
+    else:
+        rows = []
+        if doc.kind == "tags":
+            rows = ['"%s"  %s  %s' % (k, v.get("type", ""), v.get("address", v.get("value", ""))) for k, v in doc.tags.items()]
+        elif doc.kind in ("data", "udt"):
+            rows = ["%s : %s" % (k, v) for k, v in doc.iface.items()]
+        h.append('<pre class="code">%s</pre>' % esc("\n".join(rows) or "(nothing to show)"))
+    h.append("</div></article></main><footer>PLC Diff %s · generated %s</footer></body></html>" % (
+        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
     return "".join(h)
 
 
@@ -3862,10 +3899,15 @@ function filterBlocks(){
   $('#res-list').innerHTML = keys.map(k => { const g = groups.get(k), n = g.rows.length;
     const items = g.rows.map(b => { const j = esc(JSON.stringify(b.path)), d = b.dest || b.path;
       return `<div class="plcrow"><b>${esc(b.name)}</b><code class="tail" title="${esc(d)}"><span dir="ltr">${esc(b.sub ? b.sub + '/' : '')}</span></code>
+        <button class="btn" onclick='viewBlock(${j})'>View</button>
         <button class="btn warn" onclick='restoreBlock(${j}, this)'>Put it back</button>
         <button class="btn" onclick='restoreBlock(${j}, this, true)'>Save a copy…</button></div>`; }).join('');
     return `<details class="resgrp" data-k="${esc(k)}" ontoggle="resToggle(this)"${openAll || RES_OPEN.has(k) ? ' open' : ''}>
       <summary><b>${esc(k)}</b><span>${n} ${n === 1 ? 'export' : 'exports'}</span></summary><div class="plcs">${items}</div></details>`; }).join('');
+}
+function viewBlock(path){
+  window.open('/view/block?t=' + encodeURIComponent(TOKEN) + '&rev=' + encodeURIComponent($('#res-rev').value) +
+              '&path=' + encodeURIComponent(path), '_blank');
 }
 function resToggle(el){ if ($('#res-find').value.trim()) return; el.open ? RES_OPEN.add(el.dataset.k) : RES_OPEN.delete(el.dataset.k); }
 async function restoreBlock(path, btn, copy, force){
@@ -4545,6 +4587,18 @@ def run_app(port=0, open_browser=True):
             if plc:
                 meta["repo"] = "%s · %s" % (root.name, plc)
             return "text/html", build_html(meta, reports, q.get("all", ["0"])[0] == "1").encode("utf-8")
+        if path == "/view/block":
+            rev, rel = q.get("rev", [""])[0], q.get("path", [""])[0]
+            plc = cur_plc()
+            if not rev or not rev_ok(root, rev) or rel not in {p for p, _ in blocks_at(root, rev, plc_paths(plc, root))}:
+                return "text/html", ('<!doctype html><meta charset="utf-8"><body style="font:14px Segoe UI,sans-serif;'
+                                     'padding:30px;color:#64748b">That block is not in that version.</body>').encode()
+            data = read_rev(root, rev, rel)
+            rep = diff_file(rel, "M", data, data)
+            short, desc = rev_desc(root, rev)
+            meta = {"new_short": short, "new_desc": desc, "old_short": short, "old_desc": desc,
+                    "view": q.get("view", ["auto"])[0], "block_view": True}
+            return "text/html", build_block_html(meta, rep).encode("utf-8")
         if path == "/view/health":
             plc = q.get("plc", [""])[0]
             m = plc_map(root)

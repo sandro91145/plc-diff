@@ -249,6 +249,11 @@ def check_app(repo, tmp):
         st, j = post("/api/restoreblock", {"rev": "HEAD~1", "path": "../outside.xml"})
         say(st == 200 and j.get("error") and not j.get("ok"), "a file outside the project is refused", str(j)[:200])
         runp(["git", "checkout", "--", rel], cwd=repo)
+        st, body = get("/view/block?t=%s&rev=HEAD~1&path=%s" % (token, urllib.request.quote(rel)))
+        say(st == 200 and "<svg" in body and "FC_Station" in body and "badge" not in body.split("<main>")[-1][:2000],
+            "View draws a whole block as it was in a version", body[:200])
+        st, body = get("/view/block?t=%s&rev=HEAD~1&path=%s" % (token, urllib.request.quote("../outside.xml")))
+        say(st == 200 and "not in that version" in body, "View refuses a file that is not a block of that version", body[:200])
 
         try:
             get("/api/state", with_token=False)
