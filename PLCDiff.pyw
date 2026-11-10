@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 
-VERSION = "1.1.0"
+VERSION = "1.1.1"
 WORK = "<work>"          # marker for "files on disk"
 TEXT_EXT = {".scl", ".stl", ".awl", ".db", ".udt", ".s7dcl", ".s7res", ".txt", ".csv", ".md"}
 GATES = ("or", "and")
@@ -2273,10 +2273,29 @@ def blocks_at(root, rev, paths):
     return sorted(out, key=lambda x: natkey(x[0]))
 
 
-def restore_block(root, rev, rel, dest_dir=None):
-    """Write one export as it was in `rev` back into the workspace (or into dest_dir). Returns the file written."""
+def workspace_path(root, plc, rel):
+    """Where an export from any version belongs in the workspace now. A PLC folder may have moved since that
+    version (see plc_prefixes): an export from an earlier folder goes to the same place in the current one."""
+    pref = plc_prefixes(root).get(plc) if plc else None
+    if not pref:
+        return rel
+    base = "" if pref[0] == "." else pref[0].rstrip("/") + "/"
+    for old in sorted(pref[1:], key=len, reverse=True):
+        old = old.strip("/")
+        if not old or not rel.startswith(old + "/"):
+            continue
+        if old.rsplit("/", 1)[-1].lower() in TIA_FOLDERS:   # exports sat directly in vci/: keep "Program blocks/..."
+            parent = old.rsplit("/", 1)[0] if "/" in old else ""
+            return base + rel[len(parent) + 1 if parent else 0:]
+        return base + rel[len(old) + 1:]
+    return rel
+
+
+def restore_block(root, rev, rel, dest_dir=None, dest_rel=None):
+    """Write one export as it was in `rev` back into the workspace at dest_rel (default: where it was then),
+    or into dest_dir. Returns the file written."""
     data = read_rev(root, rev, rel)
-    dest = (Path(dest_dir) / Path(rel).name) if dest_dir else (root / rel)
+    dest = (Path(dest_dir) / Path(rel).name) if dest_dir else (root / (dest_rel or rel))
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(data)
     return dest
@@ -3813,15 +3832,16 @@ function filterBlocks(){
   const q = ($('#res-find').value || '').trim().toLowerCase();
   const rows = BLOCKS.filter(b => !q || b.name.toLowerCase().includes(q) || b.path.toLowerCase().includes(q));
   if (!rows.length) return $('#res-list').innerHTML = '<div class="hint">No block matches that.</div>';
-  $('#res-list').innerHTML = rows.slice(0, 200).map(b => { const j = esc(JSON.stringify(b.path));
-    return `<div class="plcrow"><b>${esc(b.name)}</b><code title="${esc(b.path)}">${esc(b.path)}</code>
+  $('#res-list').innerHTML = rows.slice(0, 200).map(b => { const j = esc(JSON.stringify(b.path)), d = b.dest || b.path;
+    return `<div class="plcrow"><b>${esc(b.name)}</b><code title="${esc(d)}">${esc(d)}</code>
       <button class="btn warn" onclick='restoreBlock(${j}, this)'>Put it back</button>
       <button class="btn" onclick='restoreBlock(${j}, this, true)'>Save a copy…</button></div>`; }).join('') +
     (rows.length > 200 ? `<div class="hint">… and ${rows.length - 200} more. Type a few letters to narrow it down.</div>` : '');
 }
 async function restoreBlock(path, btn, copy, force){
   const rev = $('#res-rev').value, label = ($('#res-rev').selectedOptions[0] || {}).textContent || rev;
-  if (!copy && !force && !confirm('Replace this file in the workspace:\n\n' + path +
+  const dest = ((BLOCKS.find(b => b.path === path) || {}).dest) || path;
+  if (!copy && !force && !confirm('Replace this file in the workspace:\n\n' + dest +
       '\n\nwith the version from:\n\n' + label.trim() + '\n\nAfterwards, in TIA: right-click the block → Import from workspace.')) return;
   busy(btn, true, copy ? 'Choose the folder…' : 'Putting it back…');
   const j = await api('/api/restoreblock', {rev, path, copy: !!copy, force: !!force});
@@ -4308,7 +4328,8 @@ def run_app(port=0, open_browser=True):
             if not rev_ok(root, rev):
                 return {"error": "That version is not in this project (any more)."}
             plc = cur_plc()
-            return {"plc": plc, "blocks": [{"path": p, "name": n} for p, n in blocks_at(root, rev, plc_paths(plc, root))]}
+            return {"plc": plc, "blocks": [{"path": p, "name": n, "dest": workspace_path(root, plc, p)}
+                                           for p, n in blocks_at(root, rev, plc_paths(plc, root))]}
         if path == "/api/restoreblock":
             rev = str(body.get("rev") or "").strip()
             rel = str(body.get("path") or "").strip()
@@ -4327,10 +4348,11 @@ def run_app(port=0, open_browser=True):
                     if not folder:
                         return {"cancelled": True}
                     return {"ok": True, "copy": True, "written": str(restore_block(root, rev, rel, folder))}
-                if not body.get("force") and git(root, "status", "--porcelain", "--", rel).decode("utf-8", "replace").strip():
+                dest = workspace_path(root, plc, rel)
+                if not body.get("force") and git(root, "status", "--porcelain", "--", dest).decode("utf-8", "replace").strip():
                     return {"dirty": True, "error": "%s has changes that are not committed yet. "
-                                                    "Putting the old version back would lose them." % Path(rel).name}
-                return {"ok": True, "written": str(restore_block(root, rev, rel)), "name": Path(rel).stem}
+                                                    "Putting the old version back would lose them." % Path(dest).name}
+                return {"ok": True, "written": str(restore_block(root, rev, rel, dest_rel=dest)), "name": Path(rel).stem}
         if path == "/api/push":
             with state["lock"]:
                 ok, out = push(root)

@@ -268,6 +268,51 @@ def check_app(repo, tmp):
             proc.kill()
 
 
+# --- 7. a PLC whose folder moved: an old version goes back into today's folder --------------
+def check_moved_plc(tmp):
+    print("Get a block back after the PLC folder moved")
+    import importlib.machinery, importlib.util
+    loader = importlib.machinery.SourceFileLoader("plcdiff_under_test", str(APP))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    pd = importlib.util.module_from_spec(spec)
+    loader.exec_module(pd)
+    for case, was in (("inferred", None), ("was", "vci/OldName")):
+        repo = tmp / ("moved-" + case)
+        repo.mkdir(parents=True)
+        env = dict(os.environ, GIT_AUTHOR_NAME="Smoke", GIT_AUTHOR_EMAIL="smoke@test",
+                   GIT_COMMITTER_NAME="Smoke", GIT_COMMITTER_EMAIL="smoke@test")
+        g = lambda *a: runp(["git"] + list(a), cwd=repo, env=env)
+        g("init", "-q", ".")
+        runp([PY, SAMPLES, repo, "old"])                        # exports straight in vci/ (old TIA layout)
+        if was:
+            (repo / was).mkdir(parents=True)
+            for d in ("Program blocks", "PLC tags"):
+                shutil.move(str(repo / "vci" / d), str(repo / was / d))
+        g("add", "-A"); g("commit", "-q", "-m", "old layout")
+        first = g("rev-parse", "HEAD")[1].strip()
+        src = repo / (was or "vci")
+        (repo / "vci" / "PLC_1").mkdir(parents=True)
+        for d in ("Program blocks", "PLC tags"):
+            shutil.move(str(src / d), str(repo / "vci" / "PLC_1" / d))
+        cfg = {"name": "PLC_1", "path": "vci/PLC_1"}
+        if was:
+            cfg["was"] = [was]
+        (repo / "plcdiff.json").write_text(json.dumps({"plcs": [cfg]}), encoding="utf-8")
+        g("add", "-A"); g("commit", "-q", "-m", "moved into PLC_1")
+        root = repo.resolve()
+        blocks = pd.blocks_at(root, first, pd.plc_paths("PLC_1", root))
+        rel = next((p for p, n in blocks if n == "FC_Station"), "")
+        say(bool(rel), "%s: the block from before the move is listed" % case, str(blocks)[:200])
+        if not rel:
+            continue
+        dest = pd.workspace_path(root, "PLC_1", rel)
+        say(dest == "vci/PLC_1/Program blocks/Station/FC_Station.xml",
+            "%s: it goes back into today's PLC folder" % case, dest)
+        out = pd.restore_block(root, first, rel, dest_rel=dest)
+        say(Path(out) == root / dest and not (root / rel).exists(),
+            "%s: no file is written to the old folder" % case, str(out))
+
+
 def main():
     keep = "--keep" in sys.argv
     print("PLC Diff smoke test - %s" % APP)
@@ -287,6 +332,7 @@ def main():
         check_files_mode(repo, tmp)
         check_work(repo)
         check_history(repo, tmp)
+        check_moved_plc(tmp)
         if "--no-app" not in sys.argv:
             check_app(repo, tmp)
         else:
