@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python tests/smoke.py:*)",
+      "Bash(python3 tests/smoke.py:*)",
+      "Bash(py tests/smoke.py:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python3 -m py_compile:*)",
+      "Bash(py -m py_compile:*)",
+      "Bash(python tests/make_samples.py:*)",
+      "Bash(python3 tests/make_samples.py:*)",
+      "Bash(py tests/make_samples.py:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git blame:*)"
+    ]
+  }
+}
