@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 
-VERSION = "1.0.1"
+VERSION = "1.1.0"
 WORK = "<work>"          # marker for "files on disk"
 TEXT_EXT = {".scl", ".stl", ".awl", ".db", ".udt", ".s7dcl", ".s7res", ".txt", ".csv", ".md"}
 GATES = ("or", "and")
@@ -2257,6 +2257,31 @@ def read_rev(root, rev, p):
     return git(root, "show", "%s:%s" % (rev, p))
 
 
+def blocks_at(root, rev, paths):
+    """Every export that existed in this version, as [(path in the repo, block name)]."""
+    skip = tuple(p[len(":(exclude)"):].rstrip("/") + "/" for p in paths if p.startswith(":(exclude)"))
+    seen, out = set(), []
+    for p in [x for x in paths if not x.startswith(":(")]:
+        args = ["ls-tree", "-r", "--name-only", rev]
+        if p != ".":
+            args += ["--", p]
+        for rel in git(root, *args, check=False).decode("utf-8", "replace").splitlines():
+            rel = rel.strip()
+            if rel.lower().endswith(".xml") and rel not in seen and not rel.startswith(skip):
+                seen.add(rel)
+                out.append((rel, Path(rel).stem))
+    return sorted(out, key=lambda x: natkey(x[0]))
+
+
+def restore_block(root, rev, rel, dest_dir=None):
+    """Write one export as it was in `rev` back into the workspace (or into dest_dir). Returns the file written."""
+    data = read_rev(root, rev, rel)
+    dest = (Path(dest_dir) / Path(rel).name) if dest_dir else (root / rel)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(data)
+    return dest
+
+
 
 # =============================================================================
 #  PLCs: one folder per PLC under vci/  (vci/<PLC>/Program blocks/...)
@@ -3363,6 +3388,8 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px}
 .recent a{display:block;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 14px;margin:8px 0;color:var(--ink);text-decoration:none;cursor:pointer}
 .recent a:hover{border-color:var(--accent)}.recent a small{display:block;color:var(--muted);font:12px Consolas,monospace}
 .pathrow{display:flex;gap:8px;margin-top:14px}.pathrow input{flex:1;font:13px Consolas,monospace;padding:9px 10px;border:1px solid var(--line);border-radius:8px}
+.pathrow select{font:13px Segoe UI,sans-serif;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#fff}
+.hint{padding:8px 2px;font-size:13px;color:var(--muted)}
 .toast{position:fixed;right:18px;bottom:18px;max-width:420px;z-index:9;box-shadow:0 8px 30px rgba(15,23,42,.18)}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid #cbd5e1;border-top-color:var(--accent);border-radius:50%;animation:s 1s linear infinite;vertical-align:-2px}
 @keyframes s{to{transform:rotate(360deg)}}
@@ -3749,9 +3776,62 @@ async function loadSetup(){
   if (r && r.is_repo) h += `<div class="card"><h2>Check all blocks</h2><div class="chk"><div class="t"><b>Can PLC Diff read every block?</b>
      <span>Reads and draws every export${S.plc ? ' of ' + esc(S.plc) : ''} and lists any it can't fully show. Takes a minute for big projects.</span></div>
      <div class="a"><button class="btn pri" onclick="checkAllBlocks()">Check all blocks</button></div></div></div>`;
+  if (r && r.is_repo) h += `<div class="card"><h2>Get an old version of a block back</h2>
+     <div class="chk"><div class="t"><b>Put an earlier version of one block into the TIA workspace</b>
+     <span>Choose a version, then the block. Its file in the workspace folder is replaced with that older version, ready for
+     <b>Import from workspace</b> in TIA${S.plc ? '. Only ' + esc(S.plc) + ' blocks are listed' : ''}. No other file is touched.</span></div>
+     <div class="a"><button class="btn pri" onclick="toggleRestore(this)">Choose a version…</button></div></div>
+     <div id="respanel" hidden>
+       <div class="pathrow"><select id="res-rev" onchange="loadBlocks()" style="flex:1"></select></div>
+       <div class="pathrow"><input type="text" id="res-find" placeholder="Find a block, e.g. Kette or FC_" oninput="filterBlocks()"></div>
+       <div id="res-list" class="plcs"></div>
+     </div></div>`;
   if (r) h += `<div class="card"><h2>Folder</h2><div class="chk"><div class="t"><b>${esc(r.name)}</b><span>${esc(r.path)}</span></div>
      <div class="a"><button class="btn" onclick="api('/api/explore',{})">Open in Explorer</button><button class="btn" onclick="chooseAgain()">Choose another folder</button></div></div></div>`;
   $('#setup').innerHTML = h;
+}
+// ---------- get an old version of a block back
+let BLOCKS = [];
+async function toggleRestore(btn){
+  const p = $('#respanel'); p.hidden = !p.hidden;
+  if (p.hidden) return;
+  busy(btn, true, 'Reading the versions…');
+  const j = await api('/api/revs'); busy(btn, false);
+  if (j.error) return toast(j.error, 'err');
+  $('#res-rev').innerHTML = (j.revs || []).map(r => `<option value="${esc(r.hash)}">${esc(r.label)}</option>`).join('');
+  loadBlocks();
+}
+async function loadBlocks(){
+  $('#res-list').innerHTML = '<div class="hint">Reading the blocks of that version…</div>';
+  const j = await api('/api/blocks', {rev: $('#res-rev').value});
+  if (j.error){ $('#res-list').innerHTML = ''; return toast(j.error, 'err', 12000); }
+  BLOCKS = j.blocks || [];
+  filterBlocks();
+}
+function filterBlocks(){
+  if (!BLOCKS.length) return $('#res-list').innerHTML = '<div class="hint">No exports in that version.</div>';
+  const q = ($('#res-find').value || '').trim().toLowerCase();
+  const rows = BLOCKS.filter(b => !q || b.name.toLowerCase().includes(q) || b.path.toLowerCase().includes(q));
+  if (!rows.length) return $('#res-list').innerHTML = '<div class="hint">No block matches that.</div>';
+  $('#res-list').innerHTML = rows.slice(0, 200).map(b => { const j = esc(JSON.stringify(b.path));
+    return `<div class="plcrow"><b>${esc(b.name)}</b><code title="${esc(b.path)}">${esc(b.path)}</code>
+      <button class="btn warn" onclick='restoreBlock(${j}, this)'>Put it back</button>
+      <button class="btn" onclick='restoreBlock(${j}, this, true)'>Save a copy…</button></div>`; }).join('') +
+    (rows.length > 200 ? `<div class="hint">… and ${rows.length - 200} more. Type a few letters to narrow it down.</div>` : '');
+}
+async function restoreBlock(path, btn, copy, force){
+  const rev = $('#res-rev').value, label = ($('#res-rev').selectedOptions[0] || {}).textContent || rev;
+  if (!copy && !force && !confirm('Replace this file in the workspace:\n\n' + path +
+      '\n\nwith the version from:\n\n' + label.trim() + '\n\nAfterwards, in TIA: right-click the block → Import from workspace.')) return;
+  busy(btn, true, copy ? 'Choose the folder…' : 'Putting it back…');
+  const j = await api('/api/restoreblock', {rev, path, copy: !!copy, force: !!force});
+  busy(btn, false);
+  if (j.cancelled) return;
+  if (j.dirty) return confirm(j.error + '\n\nPut the old version back anyway?') ? restoreBlock(path, btn, copy, true) : undefined;
+  if (j.error) return toast(j.error, 'err', 15000);
+  toast(copy ? 'Saved a copy: ' + j.written
+             : 'Put back: ' + j.written + ' — now in TIA: right-click the block → Import from workspace.', 'ok', 25000);
+  await refresh();
 }
 async function setGit(btn){ busy(btn, true); const j = await api('/api/gitpath', {path: $('#gp').value}); busy(btn, false);
   j.error ? toast(j.error, 'err', 12000) : (toast('Git found.'), loadSetup()); }
@@ -4221,6 +4301,36 @@ def run_app(port=0, open_browser=True):
                     if not pok:
                         res["push_error"] = pout[-400:]
             return res
+        if path == "/api/blocks":
+            rev = str(body.get("rev") or "").strip()
+            if not rev:
+                return {"error": "Choose a version first."}
+            if not rev_ok(root, rev):
+                return {"error": "That version is not in this project (any more)."}
+            plc = cur_plc()
+            return {"plc": plc, "blocks": [{"path": p, "name": n} for p, n in blocks_at(root, rev, plc_paths(plc, root))]}
+        if path == "/api/restoreblock":
+            rev = str(body.get("rev") or "").strip()
+            rel = str(body.get("path") or "").strip()
+            if not rev or not rel:
+                return {"error": "Choose a version and a block first."}
+            if not rev_ok(root, rev):
+                return {"error": "That version is not in this project (any more)."}
+            plc = cur_plc()
+            if rel not in {p for p, _ in blocks_at(root, rev, plc_paths(plc, root))}:
+                return {"error": "That block is not part of %s in that version." % (plc or "this project")}
+            with state["lock"]:
+                if body.get("copy"):
+                    folder, err = pick_folder(str(root))
+                    if err:
+                        return {"error": err}
+                    if not folder:
+                        return {"cancelled": True}
+                    return {"ok": True, "copy": True, "written": str(restore_block(root, rev, rel, folder))}
+                if not body.get("force") and git(root, "status", "--porcelain", "--", rel).decode("utf-8", "replace").strip():
+                    return {"dirty": True, "error": "%s has changes that are not committed yet. "
+                                                    "Putting the old version back would lose them." % Path(rel).name}
+                return {"ok": True, "written": str(restore_block(root, rev, rel)), "name": Path(rel).stem}
         if path == "/api/push":
             with state["lock"]:
                 ok, out = push(root)

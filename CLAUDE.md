@@ -52,7 +52,8 @@ very deep — keep paths and drawings robust for that.
 | Drawing | LAD: blocks (`blk_contact/coil/cmp/box`), `series`/`par_block`/`split_block`, `make_trie` (shared prefixes → branches to multiple coils), `net_svg`. FBD: `fbd_boxlike`, `fbd_block`, `net_svg_fbd`. `draw_net` picks LAD/FBD by network language (`FBD`/`F_FBD` → FBD). `tmid()` shortens long tag names in the middle so the end stays visible |
 | S7-GRAPH | `parse_graph_sequence`, `graph_summary`, `graph_links` (structure with branches resolved), `compare_graph`, `graph_svg` (layered layout: rank = longest path, column by DFS; branch bars; jumps as ↓S#), `html_graph_net` (chain before/after + changed conditions drawn as FBD) |
 | Report | `print_report` (terminal), `build_html` (compare page: TOC, SAFETY badges, safety bar, networks before/after, "Logic as text", sign-off sheet, print CSS / "Print / save as PDF") |
-| Git | `git()`, `rev_ok`, `rev_desc`, `changed_files` (rename limit raised; **pure moves R100 skipped**, counted in `moves`), `read_rev` (WORK = files on disk); `NOWIN` hides console windows on Windows; `ensure_git_on_path` |
+| Git | `git()`, `rev_ok`, `rev_desc`, `changed_files` (rename limit raised; **pure moves R100 skipped**, counted in `moves`), `read_rev` (WORK = files on disk); `blocks_at` (exports that existed in a version), `restore_block` (write one
+export back into the workspace, or a copy elsewhere); `NOWIN` hides console windows on Windows; `ensure_git_on_path` |
 | PLCs | `plcdiff.json` (`plcs: [{name, path, was?}]`), `plc_map`, `plc_prefixes` (current + earlier folders so history survives a move; inferred for exports that used to sit directly in `vci/`), `list_plcs`, `plc_of`, `plc_paths` (adds `:(exclude)` for nested PLC folders) |
 | History DB | `update_history` (incremental over `git log --first-parent`, removes rewritten commits), `rows_for_report`, `history_rows` (adds `plc`, `safety`), `write_csv` (`;` + BOM for Portuguese Excel), `build_history_html` (search/filters + charts in plain SVG/JS), `install_hook` (post-commit hook) |
 | App | settings, `run()`, `find_doubled`/`merge_up` (TIA doubled-folder fix), `compute_reports`, `suggest_message`, `repo_info`, `project_summary`, `scan_for_projects`, `create_project`, `init_repo`, `pull` (rebase+autostash, clean abort on conflict), `push` (auto-pull-and-retry), `clone`, `health_check`/`build_health_html`, `pick_folder`/`pick_file` (tkinter in a subprocess), `APP_CSS`/`APP_JS`/`APP_HTML`, `run_app` (HTTP server, token in header for /api, `?t=` for /view, Host check, 60 s idle shutdown, instance file, restart) |
@@ -61,7 +62,7 @@ very deep — keep paths and drawings robust for that.
 HTTP endpoints: GET `/`, `/api/{ping,state,projects,suggest,revs}`, `/view/{report,history,csv,health}`;
 POST `/api/{pick,pickfile,open,identity,gitpath,clone,projects/add,projects/remove,scan,fetchall,newproject,init,
 remote,ignore,fixdouble,hook,commit,push,fetch,pull,resolve,plc,plcfolder,plcremove,addplc,moveplc,release,
-explore,quit,restart}`.
+blocks,restoreblock,explore,quit,restart}`.
 
 
 ## 5. What we learned about the formats (important — verified on real TIA V20 exports)
@@ -116,7 +117,7 @@ explore,quit,restart}`.
 
 ## 8. How we test
 
-- **`python tests/smoke.py` runs the whole checklist below in one go** (~30 checks, ~20 s): both files compile,
+- **`python tests/smoke.py` runs the whole checklist below in one go** (37 checks, ~20 s): both files compile,
   a throwaway Git repo is built from the samples, the compare finds every kind of change (tag, interface, contact,
   box pin, call parameter, negated input, added/removed network), the HTML page really contains drawings and print
   CSS, `--files` / `--work` / `--history` work, the CSV has the BOM and `;` Excel needs, and the app itself starts,
@@ -137,8 +138,11 @@ explore,quit,restart}`.
 
 - Not read/drawn: hardware configuration, HMI, technology objects as diagrams (shown as text/“not understood”).
 - Data blocks: start-value changes are listed but not as a nice table.
-- Possible next: "Compare two folders" without Git; restore an old block version (write it back for *Import from
-  workspace*); "where is this tag used" search; review sign-off per commit; shared network install with auto-update.
+- Possible next: "Compare two folders" without Git; "where is this tag used" search; review sign-off per commit;
+  shared network install with auto-update.
+- Done in 1.1.0: **restore an old block version** — `Setup → Get an old version of a block back` writes one export
+  from any commit back into the workspace for TIA's *Import from workspace* (`/api/blocks`, `/api/restoreblock`;
+  refuses a block outside the selected PLC, and warns before overwriting uncommitted work).
 - **Setup → Check all blocks** lists every export the app can't fully draw yet — the best source of new work.
   As of 1.0.1 it comes back clean on a real project of ~1,250 exports (mostly FBD, with F_FBD safety blocks and
   S7-GRAPH sequences), so today's gaps are missing features, not parsing. Run it again after a big TIA export.

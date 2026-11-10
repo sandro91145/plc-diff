@@ -223,6 +223,30 @@ def check_app(repo, tmp):
         say(st == 200 and "<svg" in body, "report page in the app draws networks", body[:200])
         st, body = get("/view/history?t=%s" % token)
         say(st == 200 and "Something went wrong" not in body, "history page in the app loads", body[:200])
+        def post(p, payload):
+            req = urllib.request.Request("http://127.0.0.1:%d%s" % (port, p), data=json.dumps(payload).encode(),
+                                         method="POST", headers={"X-Token": token, "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, json.loads(r.read().decode("utf-8", "replace"))
+
+        # --- get an old version of a block back
+        st, j = post("/api/blocks", {"rev": "HEAD~1"})
+        names = [b["name"] for b in j.get("blocks", [])]
+        say(st == 200 and "FC_Station" in names, "/api/blocks lists the blocks of an older version", str(j)[:200])
+        rel = next((b["path"] for b in j.get("blocks", []) if b["name"] == "FC_Station"), "")
+        st, j = post("/api/restoreblock", {"rev": "HEAD~1", "path": rel})
+        say(st == 200 and j.get("ok"), "the old version is put back into the workspace", str(j)[:200])
+        code, want = runp(["git", "show", "HEAD~1:" + rel], cwd=repo)
+        say((repo / rel).read_text(encoding="utf-8") == want, "the file on disk is now that old version")
+        code, out = app("--text", "--no-open", "--work", cwd=repo)
+        say("T#5s → T#3s" in out, "the compare shows the block going back", out[-300:])
+        st, j = post("/api/restoreblock", {"rev": "HEAD~1", "path": rel})
+        say(st == 200 and j.get("dirty") and not j.get("ok"),
+            "a restore over uncommitted work warns first", str(j)[:200])
+        st, j = post("/api/restoreblock", {"rev": "HEAD~1", "path": "../outside.xml"})
+        say(st == 200 and j.get("error") and not j.get("ok"), "a file outside the project is refused", str(j)[:200])
+        runp(["git", "checkout", "--", rel], cwd=repo)
+
         try:
             get("/api/state", with_token=False)
             say(False, "/api without a token is refused")
