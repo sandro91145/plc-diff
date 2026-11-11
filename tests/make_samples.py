@@ -240,10 +240,34 @@ def fbd_motor(new):
     return cu(2, "Motor enable", nb.xml(), "FBD")
 
 
+def fbd_direct(new):
+    """FBD "Q_Ready" = "I_Ready": a tag wired straight into a coil, no gate in between."""
+    nb = NB()
+    src, q = nb.glob("I_ReadyOk" if new else "I_Ready"), nb.glob("Q_Ready")
+    k = coil(nb, q)
+    nb.w(src, (k, "in"))
+    return cu(3, "Ready lamp", nb.xml(), "FBD")
+
+
 def fbd_fc(new):
-    units = [fbd_ext(new), fbd_motor(new)]
+    units = [fbd_ext(new), fbd_motor(new), fbd_direct(new)]
     return fc("FC_Alarms", "176", iface([]), units).replace("<ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList>",
                                                                  "<ProgrammingLanguage>FBD</ProgrammingLanguage></AttributeList><ObjectList>")
+
+
+def db(new):
+    """A global DB: a start value, a data type and the order of members change, one member is added."""
+    rows = [("Speed", "Int", "1200"), ("Ramp", "Time", "T#2S"), ("Mode", "Byte", ""), ("Count", "DInt", "")]
+    if new:
+        rows = [("Speed", "Int", "1500"), ("Mode", "Byte", ""), ("Ramp", "Time", "T#2S"), ("Count", "LInt", ""),
+                ("Limit", "Real", "99.5")]
+    m = "".join('<Member Name="%s" Datatype="%s">%s</Member>' % (n, d, "<StartValue>%s</StartValue>" % v if v else "")
+                for n, d, v in rows)
+    return ('<?xml version="1.0" encoding="utf-8"?>\n<Document><Engineering version="V20" /><SW.Blocks.GlobalDB ID="0">'
+            '<AttributeList><Interface><Sections xmlns="%s"><Section Name="Static">%s</Section></Sections></Interface>'
+            '<MemoryLayout>Standard</MemoryLayout><Name>DB_Settings</Name><Number>20</Number>'
+            '<ProgrammingLanguage>DB</ProgrammingLanguage></AttributeList><ObjectList>%s</ObjectList>'
+            '</SW.Blocks.GlobalDB></Document>' % (IFC, m, ml("Title", "Station settings", "F1")))
 
 
 def tags(new):
@@ -267,3 +291,4 @@ if __name__ == "__main__":
     (out / "vci" / "Program blocks" / "Station" / "FC_Station.xml").write_text(block(new), encoding="utf-8")
     (out / "vci" / "Program blocks" / "Station" / "FC_Alarms.xml").write_text(fbd_fc(new), encoding="utf-8")
     (out / "vci" / "PLC tags" / "Station1_IO.xml").write_text(tags(new), encoding="utf-8")
+    (out / "vci" / "Program blocks" / "Station" / "DB_Settings.xml").write_text(db(new), encoding="utf-8")

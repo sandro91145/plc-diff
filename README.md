@@ -19,8 +19,10 @@ It runs on your own PC, opens in your browser, and needs nothing but Python and 
 
 - **Compare versions** — any two commits, or your unsaved export against the last commit. LAD drawn as ladder,
   FBD as FBD, S7-GRAPH as a step chain (steps, transitions, branches, jumps, supervisions, interlocks),
-  SCL/STL as a text diff. Also data blocks, UDTs and tag tables. Changed files are grouped like TIA's project tree (Program blocks, PLC tags,
-  PLC data types, …), each group opens and closes.
+  SCL/STL as a text diff. Data blocks and UDTs as a before/after table (data type, start value, moved members).
+  Changed files are grouped like TIA's project tree (Program blocks, PLC tags, PLC data types, …), each group opens
+  and closes. A block TIA only renumbered after a compile says "no logic change".
+- **Compare two folders** — no Git needed: e.g. the customer's export against yours, or a backup from site.
 - **Change history** — every change with date, time and author, searchable, with charts, and a download for Excel.
 - **Commit and share** — one button to save ("commit") and send ("push") your changes, with a suggested message
   that lists what changed. Pull, conflicts (keep mine / use theirs) are handled for you.
@@ -28,12 +30,18 @@ It runs on your own PC, opens in your browser, and needs nothing but Python and 
 - **Several projects** — a home screen with all your projects and their status.
 - **Safety** — F-blocks (F_LAD / F_FBD / F_DB) are marked, need an extra confirmation before committing, and can be
   reported on their own with a sign-off sheet.
-- **View any block** — draw a whole block (LAD, FBD, S7-GRAPH chain) as it was in any version, even if it never
-  changed. Setup → **Get an old version of a block back** → **View**.
+- **Blocks tab** — every block of any version, grouped like TIA's project tree. Click one to see it drawn (LAD, FBD,
+  S7-GRAPH chain), even if it never changed; **History** lists every commit that changed it, with what changed.
+- **Where is this tag used?** — type a tag in the Blocks tab: every network, data block and tag table that uses it,
+  drawn, with the tag highlighted.
+- **Review sign-off** — mark a commit as reviewed (with a remark); it is shared with the team through Git and shows
+  in the history, the compare page and the printed sign-off sheet.
 - **Get an old version back** — put any earlier version of a single block into the TIA workspace folder, ready for
   *Import from workspace* in TIA. Setup → **Get an old version of a block back**.
 - **Releases and reports** — mark a version as a release (e.g. FAT, SAT), attach the archive, print any comparison
   or save it as PDF.
+- **Updates** — PLC Diff tells you when a new version is on GitHub and updates itself with one click (Setup → Updates
+  to turn this off).
 
 ![Change history](docs/images/history.png)
 
@@ -60,6 +68,7 @@ No extra Python packages are needed. If the app can't find Git, paste the path t
 python PLCDiff.pyw --app                 # start the app
 python PLCDiff.pyw HEAD~1 HEAD           # compare two commits, open the report
 python PLCDiff.pyw --files old.xml new.xml
+python PLCDiff.pyw --folders D:\Customer\Export D:\Projects\MyProject\vci\PLC_1
 python PLCDiff.pyw --history --csv changes.csv   # history page + file for Excel
 python PLCDiff.pyw --help
 ```

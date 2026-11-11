@@ -51,18 +51,22 @@ very deep — keep paths and drawings robust for that.
 | Diffing | `compare_nets` (element multiset diff, pairs operand changes, box pin changes → `pins_old/new`), `align_nets` (SequenceMatcher over network fingerprints + title/similarity pairing), `diff_file` → `FileReport` |
 | Drawing | LAD: blocks (`blk_contact/coil/cmp/box`), `series`/`par_block`/`split_block`, `make_trie` (shared prefixes → branches to multiple coils), `net_svg`. FBD: `fbd_boxlike`, `fbd_block`, `net_svg_fbd`. `draw_net` picks LAD/FBD by network language (`FBD`/`F_FBD` → FBD). `tmid()` shortens long tag names in the middle so the end stays visible |
 | S7-GRAPH | `parse_graph_sequence`, `graph_summary`, `graph_links` (structure with branches resolved), `compare_graph`, `graph_svg` (layered layout: rank = longest path, column by DFS; branch bars; jumps as ↓S#), `html_graph_net` (chain before/after + changed conditions drawn as FBD) |
-| Report | `print_report` (terminal), `build_html` (compare page: TOC, SAFETY badges, safety bar, networks before/after, "Logic as text", sign-off sheet, print CSS / "Print / save as PDF"), `build_block_html` (one block in one version, every network drawn - `/view/block`); `report_groups` puts the changed files in collapsible sections per TIA folder (Program blocks, PLC tags, PLC data types… - closed when more than 8 files; the table of contents opens the right one, printing opens all) |
+| Report | `print_report` (terminal), `build_html` (compare page: TOC, SAFETY badges, safety bar, networks before/after, "Logic as text", sign-off sheet, print CSS / "Print / save as PDF"), `build_block_html` (one block in one version, every network drawn - `/view/block`), `build_where_html` (`where_used`: every network / DB / tag table using a tag, highlighted), `build_blockhistory_html` (`block_history`: `git log --follow` of one export), `html_member_table` (DB/UDT before/after table), `compare_folders` (two folders, no Git - `/view/folders`, `--folders`); `report_groups` puts the changed files in collapsible sections per TIA folder (Program blocks, PLC tags, PLC data types… - closed when more than 8 files; the table of contents opens the right one, printing opens all) |
 | Git | `git()`, `rev_ok`, `rev_desc`, `changed_files` (rename limit raised; **pure moves R100 skipped**, counted in `moves`), `read_rev` (WORK = files on disk); `blocks_at` (exports that existed in a version), `restore_block` (write one
 export back into the workspace, or a copy elsewhere), `workspace_path` (where an export from an older version belongs in today's PLC folder), `export_place` (PLC, TIA folder and sub-folder of an export, for grouped lists); `NOWIN` hides console windows on Windows; `ensure_git_on_path` |
 | PLCs | `plcdiff.json` (`plcs: [{name, path, was?}]`), `plc_map`, `plc_prefixes` (current + earlier folders so history survives a move; inferred for exports that used to sit directly in `vci/`), `list_plcs`, `plc_of`, `plc_paths` (adds `:(exclude)` for nested PLC folders) |
 | History DB | `update_history` (incremental over `git log --first-parent`, removes rewritten commits), `rows_for_report`, `history_rows` (adds `plc`, `safety`), `write_csv` (`;` + BOM for Portuguese Excel), `build_history_html` (search/filters + charts in plain SVG/JS), `install_hook` (post-commit hook) |
 | App | settings, `run()`, `find_doubled`/`merge_up` (TIA doubled-folder fix), `compute_reports`, `suggest_message`, `repo_info`, `project_summary`, `scan_for_projects`, `create_project`, `init_repo`, `pull` (rebase+autostash, clean abort on conflict), `push` (auto-pull-and-retry), `clone`, `health_check`/`build_health_html`, `pick_folder`/`pick_file` (tkinter in a subprocess), `APP_CSS`/`APP_JS`/`APP_HTML`, `run_app` (HTTP server, token in header for /api, `?t=` for /view, Host check, 60 s idle shutdown, instance file, restart) |
+| Reviews | `reviews_map` / `add_review` / `sync_reviews`: one Git note per reviewed commit in `refs/notes/plcdiff-review` (JSON lines, ASCII), merged with `cat_sort_uniq` on Get latest and pushed after Push - nothing is committed for a review |
+| Updates | `check_update` (GitHub latest release, `PLCDIFF_UPDATE_URL` overrides it - tests use a `file://` stand-in), `install_update` (checks the download says `VERSION = "x"` and compiles, keeps `PLCDiff.pyw.bak`, replaces atomically) |
 | main | dispatch: `--app` or no args under `pythonw` → app; otherwise CLI |
 
 HTTP endpoints: GET `/`, `/api/{ping,state,projects,suggest,revs}`, `/view/{report,history,csv,health}`;
 POST `/api/{pick,pickfile,open,identity,gitpath,clone,projects/add,projects/remove,scan,fetchall,newproject,init,
 remote,ignore,fixdouble,hook,commit,push,fetch,pull,resolve,plc,plcfolder,plcremove,addplc,moveplc,release,
-blocks,restoreblock,explore,quit,restart}`; GET `/view/block?rev=&path=` draws one block.
+blocks,restoreblock,review,update,explore,quit,restart}`; GET `/view/{block,blockhistory,whereused,folders}`.
+`rev=WORK` means the files on disk in `/api/blocks`, `/view/block`, `/view/whereused`; `/view/report?file=` limits a
+compare to some files (a block's history).
 
 
 ## 5. What we learned about the formats (important — verified on real TIA V20 exports)
@@ -73,7 +77,8 @@ blocks,restoreblock,explore,quit,restart}`; GET `/view/block?rev=&path=` draws o
   `Contact` (negated via `<Negated Name="operand"/>`), `PContact`/`NContact` (pin `bit`). Coils: `Coil`, `SCoil`,
   `RCoil`… Compare boxes (`Gt`, `Eq`…) use pins `pre`/`in1`/`in2`. FBD gates: `A`/`O` with operands wired straight
   in, negation per input pin. Calls: `<Call><CallInfo Name BlockType><Instance/><Parameter Name Section Type/>`;
-  negated call inputs appear as `<Negated Name="<pin>"/>` on the Call.
+  negated call inputs appear as `<Negated Name="<pin>"/>` on the Call. FBD `"A" = "B"`: an `IdentCon` wired
+  straight into a coil's `in` pin (no gate) - very common (500+ coils in one real project); `_direct_op` reads it.
 - **S7-GRAPH** (FB, language GRAPH): `NetworkSource/Graph` with `PreOperations/PermanentOperation*` (FlgNet),
   `Sequence` → `Steps/Step(Number, Init, Name, MaximumStepTime, WarningTime)` with `Actions/Action(Qualifier,
   Event?)` of `Token`s, `Supervisions/Supervision` and `Interlocks/Interlock` (FlgNet ending in `SvCoil`/`IlCoil`);
@@ -88,6 +93,9 @@ blocks,restoreblock,explore,quit,restart}`; GET `/view/block?rev=&path=` draws o
   `Program blocks\Program blocks`; dragging a device can add extra levels like `vci\<project>\<PLC>\...`.
   That's why PLC folders are configurable (`Setup → PLCs → Change folder…`) and the doubled-folder fix exists.
 - Exports are UTF-8 (sometimes BOM); Git may convert line endings — compare ignores CRLF-only differences.
+- After a compile or re-export TIA may **renumber the parts** (`UId`s) and write them in another order, with no logic
+  change. `export_lines` (lines without UId/ID numbers, as a multiset) recognises that → `rep.note = "renumbered"`,
+  shown as "no logic change"; other differences outside the drawing → `note = "other"` with the raw diff.
 
 
 ## 6. Decisions and why
@@ -121,12 +129,17 @@ blocks,restoreblock,explore,quit,restart}`; GET `/view/block?rev=&path=` draws o
   names are shortened in the middle (`tmid`) so the end stays visible. Checked on 4,384 real networks: none overflow.
 - Data type (UDT) members showed as `None.Member`: TIA calls a UDT's only section "None" → `iface_members` leaves
   that section name out (block interfaces keep `Input.`, `Static.` …).
+- FBD coils fed straight by a tag were read as `:= TRUE` and drawn with nothing in front, so a change of that tag
+  was missed → `chain_of` / `fbd_tree` / `fbd_roots` use `_direct_op`. The samples have such a network now.
+- A changed **order** is a real change: DB/UDT members (memory layout) → `order_diff`; networks of a block
+  (execution order) → "network order changed". Only then may `export_lines` call the rest "renumbered".
+- An iframe with a `srcdoc` hint ignores a later `src` → `loadFrame` removes `srcdoc` first.
 - Iframe height in CSS grid (150 px default) → `grid-template-rows:minmax(0,1fr)` + `height:100%`.
 
 
 ## 8. How we test
 
-- **`python tests/smoke.py` runs the whole checklist below in one go** (59 checks, ~20 s): both files compile,
+- **`python tests/smoke.py` runs the whole checklist below in one go** (78 checks, ~30 s): both files compile,
   a throwaway Git repo is built from the samples, the compare finds every kind of change (tag, interface, contact,
   box pin, call parameter, negated input, added/removed network), the HTML page really contains drawings and print
   CSS, `--files` / `--work` / `--history` work, the CSV has the BOM and `;` Excel needs, and the app itself starts,
@@ -147,8 +160,9 @@ blocks,restoreblock,explore,quit,restart}`; GET `/view/block?rev=&path=` draws o
 
 - Not read/drawn: hardware configuration, HMI, technology objects as diagrams (shown as text/“not understood”).
 - Data blocks: start-value changes are listed but not as a nice table.
-- Possible next: "Compare two folders" without Git; "where is this tag used" search; review sign-off per commit;
-  shared network install with auto-update.
+- Possible next: hardware configuration and HMI; a network install for teams without GitHub access.
+- Done in 1.4.0: Blocks tab (view, per-block history), where is this tag used, update from GitHub, DB/UDT table,
+  compare two folders, review sign-off, member/network order changes.
 - Done in 1.1.0: **restore an old block version** — `Setup → Get an old version of a block back` writes one export
   from any commit back into the workspace for TIA's *Import from workspace* (`/api/blocks`, `/api/restoreblock`;
   refuses a block outside the selected PLC, and warns before overwriting uncommitted work).

@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 WORK = "<work>"          # marker for "files on disk"
 TEXT_EXT = {".scl", ".stl", ".awl", ".db", ".udt", ".s7dcl", ".s7res", ".txt", ".csv", ".md"}
 GATES = ("or", "and")
@@ -449,9 +449,24 @@ class Net:
                 res = [x for b in branches for x in b]
         else:
             m = self.main_in.get(uid)
-            res = (self.chain_of(self.pin_src.get((uid, m))) if m else []) + [{"t": "part", "id": uid, "p": p}]
+            if m:
+                res = self.chain_of(self.pin_src.get((uid, m))) + [{"t": "part", "id": uid, "p": p}]
+            else:
+                d = self._direct_op(p)              # FBD "A" = "B": a tag wired straight into the coil
+                if d:
+                    self._pcs[d["id"]] = {"t": "pc", "id": d["id"], "text": d["text"], "neg": d["neg"]}
+                res = ([self._pcs[d["id"]]] if d else []) + [{"t": "part", "id": uid, "p": p}]
         self._memo[uid] = res
         return res
+
+    def _direct_op(self, p):
+        """A tag wired straight into the input of a coil / NOT / contact (FBD), as an operand node - or None."""
+        if p.kind not in ("coil", "not", "contact"):
+            return None
+        k = (p.uid, "in")
+        if k in self.pin_src or k not in self.pin_val:
+            return None
+        return {"t": "op", "text": self.pin_val[k], "neg": "in" in p.negated, "id": "%s:in" % p.uid}
 
     # ---- FBD expression trees ------------------------------------------
     def fbd_tree(self, src, seen=frozenset()):
@@ -478,7 +493,7 @@ class Net:
             return {"t": "gate", "kind": p.kind, "id": "g" + uid, "ins": [inp(x) for x in ins],
                     "neg_out": "out" in p.negated}
         m = self.main_in.get(uid)
-        main = self.fbd_tree(self.pin_src.get((uid, m)), seen) if m else None
+        main = self.fbd_tree(self.pin_src.get((uid, m)), seen) if m else self._direct_op(p)
         if p.kind == "coil":                      # coil in the middle: passes the signal on
             return main
         if p.kind == "not":
@@ -498,7 +513,7 @@ class Net:
             if p.kind == "coil":
                 m = self.main_in.get(p.uid)
                 roots.append({"t": "assign", "p": p, "id": p.uid,
-                              "in": self.fbd_tree(self.pin_src.get((p.uid, m))) if m else None})
+                              "in": self.fbd_tree(self.pin_src.get((p.uid, m))) if m else self._direct_op(p)})
             else:
                 roots.append(self.fbd_tree(("pin", p.uid, "")))
         return [r for r in roots if r]
@@ -854,6 +869,7 @@ class FileReport:
         self.nets = []
         self.textdiff = []
         self.error = ""
+        self.note = ""      # "renumbered": same export, TIA only renumbered/reordered the parts; "other": see textdiff
 
     @property
     def doc(self):
@@ -866,6 +882,18 @@ class FileReport:
     def n_changes(self):
         return len(self.bullets) + sum(len(n.bullets) or 1 for n in self.nets if n.status != "same") + \
             (1 if self.textdiff and not self.bullets else 0)
+
+
+def order_diff(old, new, label):
+    """Members that moved to another place (same members, other order) - in a DB or UDT that changes the layout."""
+    a = [k for k in old if k in new]
+    b = [k for k in new if k in old]
+    if a == b:
+        return []
+    sm = difflib.SequenceMatcher(None, a, b, autojunk=False)
+    keep = {a[m.a + i] for m in sm.get_matching_blocks() for i in range(m.size)}
+    moved = [k for k in b if k not in keep]
+    return [("chg", "%s order changed - moved: %s%s" % (label, ", ".join(moved[:8]), " (+%d)" % (len(moved) - 8) if len(moved) > 8 else ""))]
 
 
 def dict_diff(old, new, label):
@@ -1040,6 +1068,19 @@ def align_nets(old, new):
     return result
 
 
+def export_lines(data):
+    """The lines of an export without TIA's internal numbers (UId / ID), as a multiset: equal for two exports of
+    the same logic that TIA only renumbered or wrote in another order (it does that when a block is compiled or
+    exported again)."""
+    from collections import Counter
+    return Counter(re.sub(r'\s(?:UId|ID)="[^"]*"', "", l).strip()
+                   for l in (data or b"").decode("utf-8-sig", "replace").splitlines())
+
+
+NOTE_TEXT = {"renumbered": "no logic change - TIA only renumbered the parts inside the export",
+             "other": "nothing the drawing shows changed - only other parts of the export (comments, attributes ...)"}
+
+
 def diff_file(path, status, old_bytes, new_bytes):
     rep = FileReport(path, status)
     ext = Path(path).suffix.lower()
@@ -1070,15 +1111,27 @@ def diff_file(path, status, old_bytes, new_bytes):
                     oi = OrderedDict((k, v) for k, v in oi.items() if not v.startswith("G7_"))
                     ni = OrderedDict((k, v) for k, v in ni.items() if not v.startswith("G7_"))
                 rep.bullets.extend(dict_diff(oi, ni, "interface"))
+                rep.bullets.extend(order_diff(oi, ni, "interface"))
             rep.nets = align_nets(o.nets if o else [], n.nets if n else [])
+            if o and n and not any(x.status != "same" for x in rep.nets):
+                of, nf = [x.fingerprint() for x in o.nets], [x.fingerprint() for x in n.nets]
+                if of != nf and sorted(of) == sorted(nf):            # same networks, other order: runs differently
+                    moved = [x for x in n.nets if of.index(x.fingerprint()) + 1 != x.idx]
+                    rep.bullets.append(("chg", "network order changed: %s" % ", ".join(
+                        "%s now %d (was %d)" % ('"%s"' % x.title if x.title else "network", x.idx, of.index(x.fingerprint()) + 1)
+                        for x in moved[:6]) + (" …" if len(moved) > 6 else "")))
         elif doc.kind in ("data", "udt"):
-            rep.bullets.extend(dict_diff(o.iface if o else OrderedDict(), n.iface if n else OrderedDict(),
-                                         "member" if doc.kind == "udt" else "variable"))
+            oi, ni = (o.iface if o else OrderedDict()), (n.iface if n else OrderedDict())
+            label = "member" if doc.kind == "udt" else "variable"
+            rep.bullets.extend(dict_diff(oi, ni, label))
+            rep.bullets.extend(order_diff(oi, ni, label))
         elif doc.kind == "tags":
             rep.bullets.extend(tag_diff(o.tags if o else OrderedDict(), n.tags if n else OrderedDict()))
         if doc.kind == "other" or (o and n and not rep.bullets and not any(x.status != "same" for x in rep.nets)):
             rep.textdiff = text_lines_diff(old_bytes.decode("utf-8-sig", "replace") if old_bytes else "",
                                            new_bytes.decode("utf-8-sig", "replace") if new_bytes else "")
+            if rep.textdiff and doc.kind != "other":
+                rep.note = "renumbered" if export_lines(old_bytes) == export_lines(new_bytes) else "other"
     except Exception as ex:  # never crash on an unexpected export
         rep.error = "%s: %s" % (type(ex).__name__, ex)
         rep.textdiff = text_lines_diff(old_bytes.decode("utf-8-sig", "replace") if old_bytes else "",
@@ -1491,7 +1544,7 @@ def fbd_block(node, marks, pins):
                "TrCoil": "Trans", "SvCoil": "Superv", "IlCoil": "Interl"}.get(p.name, p.name)
         mark = marks.get(p.uid)
         rows = [{"pin": "", "block": fbd_block(node["in"], marks, pins) if node["in"] else B(0, 20, 10, ""),
-                 "neg": p.etype == "negated coil"}]
+                 "neg": p.etype == "negated coil" or "in" in p.negated}]
         return fbd_boxlike(sym, p.operand, rows, [], None, top_mark=mark, gate=True)
     if t == "box":
         p = node["p"]
@@ -1924,7 +1977,10 @@ def print_report(meta, reports):
         if r.textdiff and not r.bullets and not any(n.status != "same" for n in r.nets):
             adds = sum(1 for l in r.textdiff if l.startswith("+"))
             dels = sum(1 for l in r.textdiff if l.startswith("-"))
-            print("  ~ text changed (+%d / -%d lines)" % (adds, dels))
+            if r.note:
+                print("  = %s (+%d / -%d lines in the file)" % (NOTE_TEXT[r.note], adds, dels))
+            else:
+                print("  ~ text changed (+%d / -%d lines)" % (adds, dels))
 
 
 CSS = r"""
@@ -1948,6 +2004,21 @@ main{max-width:1500px;margin:0 auto;padding:22px 28px 60px}
 .toc h2{font-size:13px;margin:0 0 8px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
 .toc a{color:var(--ink);text-decoration:none}.toc a:hover{color:var(--accent)}
 .toc li{margin:3px 0}.toc ul{margin:0;padding-left:18px}
+table.mt{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0 10px}
+table.mt th{text-align:left;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;padding:6px 10px;border-bottom:1px solid var(--line)}
+table.mt td{padding:6px 10px;border-bottom:1px solid var(--line);vertical-align:top}table.mt td:first-child{font-size:11px;font-weight:600;width:70px}
+table.mt tr.add td:first-child{color:var(--add)}table.mt tr.add td{background:#f0fdf4}
+table.mt tr.del td:first-child{color:var(--del)}table.mt tr.del td{background:#fef2f2}table.mt tr.del code{text-decoration:line-through}
+table.mt tr.chg td:first-child,table.mt tr.mov td:first-child{color:var(--chg)}table.mt tr.chg td,table.mt tr.mov td{background:#fffbeb}
+table.mt del{color:var(--del)}table.mt .dim{color:#cbd5e1}
+.openblk{margin-left:auto;font-size:13px;color:var(--accent);text-decoration:none;white-space:nowrap}
+table.bh{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+table.bh th{text-align:left;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding:10px 12px;border-bottom:1px solid var(--line)}
+table.bh td{padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px;vertical-align:top}table.bh td:first-child{white-space:nowrap}
+table.bh a{color:var(--accent);text-decoration:none;white-space:nowrap}table.bh tr.now td{background:#fffbeb}
+.commits .rvok{color:#86efac;font-size:12px}.commits .rvno{color:#94a3b8;font-size:12px}.commits .rvno a{color:#67e8f9}
+.signoff td.rv{font-size:13px;padding:6px 8px;color:#0f172a}
+.nochange{background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;border-radius:8px;padding:10px 14px;margin:4px 0 10px;font-size:13px}
 .toc .tg{list-style:none;margin:8px 0 2px -18px;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
 .toc .tools{float:right;font-size:12px}.toc .tools a{color:var(--accent);margin-left:12px;cursor:pointer}
 details.grp{margin:0 0 14px}details.grp>summary{list-style:none;cursor:pointer;background:var(--card);border:1px solid var(--line);
@@ -2149,11 +2220,120 @@ def build_block_html(meta, rep):
         if doc.kind == "tags":
             rows = ['"%s"  %s  %s' % (k, v.get("type", ""), v.get("address", v.get("value", ""))) for k, v in doc.tags.items()]
         elif doc.kind in ("data", "udt"):
-            rows = ["%s : %s" % (k, v) for k, v in doc.iface.items()]
-        h.append('<pre class="code">%s</pre>' % esc("\n".join(rows) or "(nothing to show)"))
+            rows = []
+            tbl = html_member_table(doc.iface, doc.iface, show_all=True)
+            h.append(tbl or '<div class="nothing">No members.</div>')
+        if rows or doc.kind not in ("data", "udt"):
+            h.append('<pre class="code">%s</pre>' % esc("\n".join(rows) or "(nothing to show)"))
     h.append("</div></article></main><footer>PLC Diff %s · generated %s</footer></body></html>" % (
         VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
     return "".join(h)
+
+
+def _split_member(v):
+    t, _, sv = str(v).partition(" := ")
+    return t, sv
+
+
+def html_member_table(old, new, show_all=False):
+    """Data block / UDT members before and after, as a table: added, removed, changed and moved rows."""
+    old, new = old or OrderedDict(), new or OrderedDict()
+    moved = set()
+    for c, t in order_diff(old, new, "x"):
+        moved = {m.strip() for m in t.split("moved: ", 1)[1].split(" (+")[0].split(",")}
+    rows, same = [], 0
+    for k in list(new) + [k for k in old if k not in new]:
+        a, b = old.get(k), new.get(k)
+        st = "add" if a is None else "del" if b is None else "chg" if a != b else "mov" if k in moved else ""
+        if not st and not show_all:
+            same += 1
+            continue
+        ta, sa = _split_member(a) if a is not None else ("", "")
+        tb, sb = _split_member(b) if b is not None else ("", "")
+        dash = '<span class="dim">—</span>'
+        cell = lambda x, y: esc(y) if x == y else (esc(x or y) if st in ("add", "del") else
+                                                   '%s → <b>%s</b>' % ('<del>%s</del>' % esc(x) if x else dash, esc(y) if y else dash))
+        name = k.split(".", 1)[1] if k.startswith(("Static.", "Input.", "Output.", "InOut.")) else k
+        rows.append('<tr class="%s"><td>%s</td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>' % (
+            st, {"add": "added", "del": "removed", "chg": "changed", "mov": "moved", "": ""}[st], esc(name),
+            cell(ta, tb), cell(sa, sb) or '<span class="dim">—</span>'))
+    if not rows:
+        return ""
+    return ('<table class="mt"><tr><th></th><th>Member</th><th>Data type</th><th>Start value</th></tr>%s</table>%s' % (
+        "".join(rows), '<div class="same-list">%d unchanged member%s not shown.</div>' % (same, "" if same == 1 else "s")
+        if same else ""))
+
+
+def _page(title, brand, h1, sub, body):
+    return ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1"><title>PLC Diff · %s</title><style>%s</style>'
+            '</head><body><header><button class="printbtn" onclick="window.print()">Print / save as PDF</button>'
+            '<div class="brand">PLC Diff · %s</div><h1>%s</h1>%s</header><main>%s</main>'
+            '<footer>PLC Diff %s · generated %s</footer></body></html>' % (
+                esc(title), CSS, esc(brand), esc(h1), sub, body, VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
+
+
+def build_where_html(meta, tag, hits, token):
+    """Every block and network that uses a tag, drawn, with the tag highlighted."""
+    from urllib.parse import quote
+    nnet = sum(len(f) for _, _, f, _ in hits)
+    sub = '<div class="range"><span class="rev"><code>%s</code>%s</span></div>' % (esc(meta["new_short"]), esc(meta["new_desc"]))
+    if not hits:
+        return _page(tag, "where is this tag used", tag, sub,
+                     '<div class="nothing">No block, data block or tag table in this version uses <b>%s</b>.<br>'
+                     'Tip: type part of the name, e.g. <code>GM_RFK</code> instead of the whole path.</div>' % esc(tag))
+    h = ['<nav class="toc"><h2>Used in %d place%s, %d file%s</h2><ul>' % (
+        nnet + sum(len(x) for *_, x in hits), "" if nnet == 1 else "s", len(hits), "" if len(hits) == 1 else "s")]
+    for i, (rel, doc, found, extra) in enumerate(hits):
+        what = ", ".join(x for x in ["%d network%s" % (len(found), "" if len(found) == 1 else "s") if found else "",
+                                      "%d entr%s" % (len(extra), "y" if len(extra) == 1 else "ies") if extra else ""] if x)
+        h.append('<li><a href="#f%d">%s</a>%s<span class="count">%s</span></li>' % (
+            i, esc(doc.name), ' <span class="sbadge">SAFETY</span>' if doc.safety else "", esc(what)))
+    h.append("</ul></nav>")
+    for i, (rel, doc, found, extra) in enumerate(hits):
+        link = '/view/block?t=%s&rev=%s&path=%s' % (esc(token), esc(meta["rev"]), esc(quote(rel)))
+        h.append('<article class="file%s" id="f%d"><div class="fh"><h2>%s</h2><span class="kind">%s</span><span class="path">%s</span>'
+                 '<a class="openblk" href="%s">Whole block →</a></div><div class="fbody">' % (
+                     " safety" if doc.safety else "", i, esc(doc.name), esc(doc.heading()), esc(rel), link))
+        if extra:
+            h.append(html_bullets([("chg", x) for x in extra]))
+        for net, ids, pins in found:
+            nd = NetDiff("same", net, net)
+            nd.marks_new = {k: "chg" for k in ids}
+            nd.pins_new = pins
+            h.append(html_net(nd, meta))
+        h.append("</div></article>")
+    return _page(tag, "where is this tag used", tag, sub, "".join(h))
+
+
+def build_blockhistory_html(name, rel, rows, token, dirty):
+    """Every commit that changed one block, with links to what changed and to the block as it was."""
+    from urllib.parse import quote
+    t = esc(token)
+    h = ['<table class="bh"><tr><th>When</th><th>Who</th><th>Commit</th><th></th></tr>']
+    if dirty:
+        h.append('<tr class="now"><td>now</td><td></td><td><b>Not committed yet</b> (files on disk)</td><td>'
+                 '<a href="/view/report?t=%s&old=HEAD&new=WORK&file=%s">What changed</a> · '
+                 '<a href="/view/block?t=%s&rev=WORK&path=%s">View</a></td></tr>' % (t, quote(rel), t, quote(rel)))
+    st_txt = {"A": "added", "D": "deleted", "R": "moved", "M": ""}
+    for r in rows:
+        prev = '%s~1' % r["hash"]
+        links = []
+        if r["status"] != "A":
+            links.append('<a href="/view/report?t=%s&old=%s&new=%s&file=%s%s">What changed</a>' % (
+                t, quote(prev), r["hash"], quote(r["path"]), "&file=" + quote(r["old"]) if r["old"] else ""))
+        if r["status"] != "D":
+            links.append('<a href="/view/block?t=%s&rev=%s&path=%s">View</a>' % (t, r["hash"], quote(r["path"])))
+        tag = st_txt.get(r["status"], "")
+        h.append('<tr><td>%s</td><td>%s</td><td><code>%s</code> %s%s</td><td>%s</td></tr>' % (
+            esc(r["date"]), esc(r["who"]), esc(r["short"]), esc(r["subject"]),
+            ' <span class="sbadge">%s</span>' % tag if tag else "", " · ".join(links)))
+    h.append("</table>")
+    if not rows and not dirty:
+        h = ['<div class="nothing">This block has not been committed yet.</div>']
+    sub = '<div class="range"><span class="rev">%d commit%s</span><span class="rev"><code>%s</code></span></div>' % (
+        len(rows), "" if len(rows) == 1 else "s", esc(rel))
+    return _page(name, "block history", name, sub, "".join(h))
 
 
 def build_html(meta, reports, show_all):
@@ -2169,8 +2349,17 @@ def build_html(meta, reports, show_all):
                  " · change report" if not meta.get("safety_only") else " · safety change report", esc(title),
                  esc(meta["old_short"]), esc(meta["old_desc"]), esc(meta["new_short"]), esc(meta["new_desc"])))
     if meta.get("log"):
+        rv, tok = meta.get("reviews"), meta.get("token")
+        def rvtag(c):
+            if rv is None:
+                return ""
+            e = rv.get(c)
+            if e:
+                return ' <span class="rvok">✓ reviewed by %s · %s</span>' % (esc(", ".join(x["who"] for x in e)), esc(e[-1]["date"]))
+            return (' <span class="rvno">not reviewed · <a href="#" onclick="review(\'%s\');return false">Mark as reviewed…</a></span>' % esc(c)
+                    if tok else ' <span class="rvno">not reviewed</span>')
         h.append('<div class="commits">' + "<br>".join(
-            "<code>%s</code>%s" % (esc(c), esc(s)) for c, s in meta["log"][:15]) + "</div>")
+            "<code>%s</code>%s%s" % (esc(c), esc(s), rvtag(c)) for c, s in meta["log"][:15]) + "</div>")
     h.append("</header><main>")
     h.append('<div class="legend"><span><i class="sw add"></i>added</span><span><i class="sw del"></i>removed</span>'
              '<span><i class="sw chg"></i>changed</span><span>Hover a shortened name to see it in full.</span></div>')
@@ -2181,12 +2370,16 @@ def build_html(meta, reports, show_all):
                  '<small>Check these against your safety review and the F-signature in TIA before downloading.</small></div>'
                  % (len(safe), "" if len(safe) == 1 else "s", names))
     if not reports:
-        if meta.get("moved"):
+        if meta.get("moved") and not meta.get("folders"):
             h.append('<div class="nothing"><b>%d file%s only moved to another folder</b> (same content), so there is nothing to '
                      'draw.<br>Pick an earlier version in <b>From</b> to see the changes made before the move.</div>' % (
                          meta["moved"], " was" if meta["moved"] == 1 else "s were"))
         else:
-            h.append('<div class="nothing">No exported files changed between these two versions.</div>')
+            h.append('<div class="nothing">%s</div>' % (
+                "The two folders have the same exports (%d and %d files%s)." % (
+                    meta["folders"] + (", %d only in another sub-folder" % meta["moved"] if meta.get("moved") else "",))
+                if meta.get("folders")
+                else "No exported files changed between these two versions."))
     else:
         groups = report_groups(reports)
         grouped = len(groups) > 1
@@ -2201,6 +2394,8 @@ def build_html(meta, reports, show_all):
                 nm = doc.name if doc else Path(r.path).name
                 nn = sum(1 for n in r.nets if n.status != "same")
                 extra = "%d network%s" % (nn, "" if nn == 1 else "s") if nn else ""
+                if not extra and not r.bullets and r.note:
+                    extra = "no logic change" if r.note == "renumbered" else "no drawn change"
                 if r.bullets:
                     extra = ", ".join(x for x in [extra, "%d other change%s" % (len(r.bullets), "" if len(r.bullets) == 1 else "s")] if x)
                 h.append('<li><a href="#f%d">%s</a>%s<span class="count">%s</span></li>' % (
@@ -2224,7 +2419,9 @@ def build_html(meta, reports, show_all):
             if r.error:
                 h.append('<div class="err">Couldn\'t read this export fully (%s). Showing the raw text changes instead. '
                          'Send this file to get it supported.</div>' % esc(r.error))
-            h.append(html_bullets(r.bullets))
+            tbl = html_member_table(r.old.iface if r.old else None, r.new.iface if r.new else None) \
+                if doc and doc.kind in ("data", "udt") and r.bullets and r.status not in ("A", "D") else ""
+            h.append(tbl or html_bullets(r.bullets))
             same = []
             for nd in r.nets:
                 if nd.status == "same" and not show_all:
@@ -2239,22 +2436,35 @@ def build_html(meta, reports, show_all):
                 h.append('<div class="same-list">%d unchanged network%s hidden (run with --all to show them).</div>' % (
                     len(same), "" if len(same) == 1 else "s"))
             if r.textdiff and (r.error or not (r.bullets or any(n.status != "same" for n in r.nets))):
-                if doc and doc.kind != "other" and not r.error:
-                    h.append('<div class="same-list">Only formatting or metadata changed. Raw text diff:</div>')
-                h.append(html_codediff(r.textdiff[:600]))
+                if r.note == "renumbered" and not r.error:
+                    h.append('<div class="nochange"><b>No logic change.</b> TIA only renumbered the parts inside this '
+                             'export - it does that when a block is compiled or exported again. Nothing to check here.</div>')
+                    h.append("<details><summary>Raw file differences</summary>%s</details>" % html_codediff(r.textdiff[:600]))
+                else:
+                    if r.note == "other" and not r.error:
+                        h.append('<div class="same-list">Nothing the drawing shows changed. The differences are in other '
+                                 'parts of the export (comments, attributes …):</div>')
+                    h.append(html_codediff(r.textdiff[:600]))
             h.append("</div></article>")
             if i in ends:
                 h.append("</details>")
     if meta.get("signoff"):
+        sv = (meta.get("reviews") or {}).get(meta["new_short"]) or []          # reviews already given in PLC Diff
         h.append('<section class="signoff"><h2>%s</h2><p>Changes from <b>%s</b> %s to <b>%s</b> %s%s.</p>'
-                 '<table><tr><th>Reviewed by</th><td></td><th>Date</th><td></td></tr>'
+                 '<table><tr><th>Reviewed by</th><td class="rv">%s</td><th>Date</th><td class="rv">%s</td></tr>'
                  '<tr><th>F-signature (TIA)</th><td></td><th>Signature</th><td></td></tr>'
-                 '<tr><th>Remarks</th><td colspan="3" class="tall"></td></tr></table></section>' % (
+                 '<tr><th>Remarks</th><td colspan="3" class="tall rv">%s</td></tr></table></section>' % (
                      "Safety review sign-off" if meta.get("safety_only") else "Review sign-off",
                      esc(meta["old_short"]), esc(meta["old_desc"]), esc(meta["new_short"]), esc(meta["new_desc"]),
-                     " · %d safety block%s" % (len(safe), "" if len(safe) == 1 else "s") if meta.get("safety_only") else ""))
-    h.append("</main><footer>PLC Diff %s · generated %s</footer>%s</body></html>" % (
-        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), GROUP_JS if reports else ""))
+                     " · %d safety block%s" % (len(safe), "" if len(safe) == 1 else "s") if meta.get("safety_only") else "",
+                     esc(", ".join(x["who"] for x in sv)), esc(", ".join(x["date"] for x in sv)),
+                     "<br>".join(esc("%s: %s" % (x["who"], x["note"])) for x in sv if x.get("note"))))
+    review_js = ("""<script>async function review(c){ const note = prompt('Mark commit ' + c + ' as reviewed.\\nRemark (optional):', '');
+  if (note === null) return; const r = await fetch('/api/review', {method: 'POST', headers: {'X-Token': %s,
+  'Content-Type': 'application/json'}, body: JSON.stringify({commit: c, note})}); const j = await r.json().catch(() => ({}));
+  if (j.error) return alert(j.error); location.reload(); }</script>""" % json.dumps(meta["token"])) if meta.get("token") else ""
+    h.append("</main><footer>PLC Diff %s · generated %s</footer>%s%s</body></html>" % (
+        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), GROUP_JS if reports else "", review_js))
     return "".join(h)
 
 
@@ -2356,19 +2566,112 @@ def read_rev(root, rev, p):
 
 
 def blocks_at(root, rev, paths):
-    """Every export that existed in this version, as [(path in the repo, block name)]."""
+    """Every export that existed in this version (WORK = the files on disk now), as [(path in the repo, name)]."""
     skip = tuple(p[len(":(exclude)"):].rstrip("/") + "/" for p in paths if p.startswith(":(exclude)"))
     seen, out = set(), []
     for p in [x for x in paths if not x.startswith(":(")]:
-        args = ["ls-tree", "-r", "--name-only", rev]
-        if p != ".":
-            args += ["--", p]
-        for rel in git(root, *args, check=False).decode("utf-8", "replace").splitlines():
+        if rev == WORK:
+            base = Path(root) if p == "." else Path(root) / p
+            names = [f.relative_to(root).as_posix() for f in base.rglob("*.xml")
+                     if ".git" not in f.parts and ".plcdiff" not in f.parts] if base.is_dir() else []
+        else:
+            args = ["ls-tree", "-r", "--name-only", rev]
+            if p != ".":
+                args += ["--", p]
+            names = git(root, *args, check=False).decode("utf-8", "replace").splitlines()
+        for rel in names:
             rel = rel.strip()
             if rel.lower().endswith(".xml") and rel not in seen and not rel.startswith(skip):
                 seen.add(rel)
                 out.append((rel, Path(rel).stem))
     return sorted(out, key=lambda x: natkey(x[0]))
+
+
+def block_history(root, rel):
+    """Every commit that changed one export, newest first, following it through folder moves:
+    [{hash, short, date, who, subject, status, path}] - path is where the file was in that commit."""
+    out = git(root, "-c", "diff.renameLimit=100000", "log", "--follow", "-M", "--name-status",
+              "--format=\x01%H%x00%h%x00%ad%x00%an%x00%s", "--date=format:%Y-%m-%d %H:%M", "--", rel,
+              check=False).decode("utf-8", "replace")
+    rows = []
+    for chunk in out.split("\x01")[1:]:
+        head, _, rest = chunk.partition("\n")
+        f = head.split("\0")
+        if len(f) < 5:
+            continue
+        st, path, old = "M", rel, ""
+        for line in rest.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 2 and parts[0]:
+                st, path = parts[0][0], parts[-1]
+                old = parts[1] if st in "RC" and len(parts) >= 3 else ""
+                break
+        rows.append({"hash": f[0], "short": f[1], "date": f[2], "who": f[3], "subject": f[4], "status": st,
+                     "path": path, "old": old})
+    return rows
+
+
+def _norm_tag(t):
+    return re.sub(r'\s+', "", str(t).replace('"', "")).lower()
+
+
+def where_used(root, rev, paths, tag, limit=400):
+    """Every place a tag is used in one version: [(path, doc, [(net, ids, pins)], extra)]. A tag matches when its
+    text contains what was typed (quotes and case don't matter), so "DB_Station".Start and DB_Station both work."""
+    q = _norm_tag(tag)
+    if len(q) < 2:
+        return []
+    pieces = [x for x in re.split(r'[."\[\]]', str(tag).replace('"', "")) if x]
+    probe = max(pieces, key=len).lower().encode("utf-8") if pieces else q.encode("utf-8")
+    hits, n = [], 0
+    for rel, _ in blocks_at(root, rev, paths):
+        try:
+            data = read_rev(root, rev, rel)
+        except Exception:
+            continue
+        if probe not in data.lower():
+            continue
+        try:
+            doc = parse_doc(data, rel)
+        except Exception:
+            continue
+        found, extra = [], []
+        if doc.kind == "code":
+            for net in doc.nets:
+                if net.is_text:
+                    if q in _norm_tag(net.text):
+                        found.append((net, set(), {}))
+                    continue
+                if net.graph is not None:
+                    g = net.graph
+                    ids = {k for k, st in g["steps"].items()
+                           if any(q in _norm_tag(a) for a in st["actions"]) or q in _norm_tag(st.get("sup_txt", "")) or
+                           q in _norm_tag(st.get("il_txt", ""))}
+                    ids |= {k for k, tr in g["trans"].items() if q in _norm_tag(tr.get("txt", ""))}
+                    if ids:
+                        found.append((net, ids, {}))
+                    continue
+                ids, pins = set(), {}
+                for e in net.elements:
+                    if e["operand"] and q in _norm_tag(e["operand"]):
+                        ids.add(e["id"])
+                    for pin, val in (e.get("pvals") or {}).items():
+                        if q in _norm_tag(val):
+                            pins.setdefault(e["id"], set()).add(pin)
+                if ids or pins:
+                    found.append((net, ids, pins))
+        elif doc.kind == "tags":
+            extra = ['tag "%s" %s %s' % (k, v.get("type", ""), v.get("address", v.get("value", "")))
+                     for k, v in doc.tags.items() if q in _norm_tag(k)]
+        elif doc.kind in ("data", "udt"):
+            extra = ["%s : %s" % (k, v) for k, v in doc.iface.items()
+                     if q in _norm_tag(doc.name + "." + k.split(".", 1)[-1]) or q in _norm_tag(k)]
+        if found or extra:
+            hits.append((rel, doc, found, extra))
+            n += len(found)
+            if n >= limit:
+                break
+    return hits
 
 
 def workspace_path(root, plc, rel):
@@ -2589,7 +2892,7 @@ def rows_for_report(rep):
     if not out and rep.textdiff:
         a = sum(1 for l in rep.textdiff if l.startswith("+"))
         d = sum(1 for l in rep.textdiff if l.startswith("-"))
-        out.append(dict(base, kind="chg", change="text changed (+%d / -%d lines)" % (a, d)))
+        out.append(dict(base, kind="chg", change=NOTE_TEXT[rep.note] if rep.note else "text changed (+%d / -%d lines)" % (a, d)))
     if rep.error and not out:
         out.append(dict(base, kind="chg", change="changed (couldn't read fully: %s)" % rep.error))
     return out
@@ -2643,10 +2946,10 @@ def update_history(root, path=".", quiet=False):
 
 def history_rows(con, root=None):
     q = ("SELECT c.date, m.short, m.message, m.author, c.block, c.block_type, c.language, c.network, "
-         "c.network_title, c.kind, c.change, c.path FROM changes c JOIN commits m ON m.hash = c.commit_hash "
+         "c.network_title, c.kind, c.change, c.path, m.hash FROM changes c JOIN commits m ON m.hash = c.commit_hash "
           "ORDER BY m.seq DESC, c.id")
     keys = ["date", "commit", "message", "author", "block", "block_type", "language", "network", "network_title",
-            "kind", "change", "path"]
+            "kind", "change", "path", "hash"]
     rows = [dict(zip(keys, r)) for r in con.execute(q)]
     mapping = plc_prefixes(root) if root is not None else None
     for r in rows:
@@ -2669,6 +2972,7 @@ def write_csv(rows, out):
 
 
 HIST_CSS = r"""
+.rvok{color:#15803d;font-size:12px;margin-top:4px}.rvno{color:#94a3b8;font-size:12px;margin-top:4px}.rvno a{color:#0e7490}
 .tools{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0 0 14px}
 .tools input,.tools select{font:14px "Segoe UI",system-ui,sans-serif;padding:8px 10px;border:1px solid var(--line);
 border-radius:8px;background:#fff;color:var(--ink)}
@@ -2743,7 +3047,7 @@ function render(){
     const [dd, tt] = r.date.split(' ');
     out.push(`<tr class="${first ? 'first' : ''}">
       <td class="when">${first ? `${esc(dd)}<small>${esc(tt)}</small>` : ''}</td>
-      <td class="cm">${first ? `<code>${esc(r.commit)}</code> <span class="au">${esc(r.author)}</span><div>${esc(r.message)}</div>` : ''}</td>
+      <td class="cm">${first ? `<code>${esc(r.commit)}</code> <span class="au">${esc(r.author)}</span><div>${esc(r.message)}</div>${reviewCell(r)}` : ''}</td>
       <td class="blk"><b>${esc(r.block)}</b>${r.safety ? ' <span class="sb">SAFETY</span>' : ''}<small>${esc([r.plc, r.block_type, r.language].filter(Boolean).join(' · '))}</small></td>
       <td class="nw">${r.network ? 'Network ' + r.network + (r.network_title ? '<br><small>' + esc(r.network_title) + '</small>' : '') : ''}</td>
       <td><span class="k ${r.kind}">${SIGN[r.kind] || ''}</span>${esc(r.change)}</td></tr>`);
@@ -2751,6 +3055,22 @@ function render(){
   $('#rows').innerHTML = out.join('') || '<tr><td colspan="5" style="padding:30px;text-align:center;color:#64748b">No changes match.</td></tr>';
   $('#count').textContent = n + ' change' + (n === 1 ? '' : 's');
   drawCharts(vis);
+}
+// ---------- review sign-off ----------
+const TOK = new URLSearchParams(location.search).get('t') || '';
+function reviewCell(r){
+  const rv = (typeof REVIEWS !== 'undefined' && REVIEWS[r.hash]) || [];
+  if (rv.length) return rv.map(e => `<div class="rvok" title="${esc(e.note || '')}">✓ Reviewed by <b>${esc(e.who)}</b> · ${esc(e.date)}${e.note ? ' · ' + esc(e.note) : ''}</div>`).join('');
+  return TOK ? `<div class="rvno">Not reviewed · <a href="#" onclick="review('${r.hash}');return false">Mark as reviewed…</a></div>` : '';
+}
+async function review(hash){
+  const note = prompt('Mark this commit as reviewed.\nRemark (optional):', '');
+  if (note === null) return;
+  const res = await fetch('/api/review', {method: 'POST', headers: {'X-Token': TOK, 'Content-Type': 'application/json'},
+                                           body: JSON.stringify({commit: hash, note})});
+  const j = await res.json().catch(() => ({error: 'Bad response'}));
+  if (j.error) return alert(j.error);
+  REVIEWS[hash] = j.reviews; render();
 }
 // ---------- charts (follow the filters above) ----------
 const KC = {add: '#16a34a', del: '#dc2626', chg: '#d97706'}, KN = {add: 'Added', del: 'Removed', chg: 'Changed'};
@@ -2818,8 +3138,9 @@ render();
 """
 
 
-def build_history_html(repo, rows, n_commits):
+def build_history_html(repo, rows, n_commits, reviews=None):
     data = json.dumps(rows, ensure_ascii=False).replace("</", "<\\/")
+    rdata = json.dumps(reviews or {}, ensure_ascii=False).replace("</", "<\\/")
     first = rows[-1]["date"][:10] if rows else ""
     last = rows[0]["date"][:10] if rows else ""
     h = ['<!doctype html><html lang="en"><head><meta charset="utf-8">'
@@ -2842,8 +3163,8 @@ def build_history_html(repo, rows, n_commits):
              '<th>Network</th><th>Change</th></tr></thead><tbody id="rows"></tbody></table></div>')
     h.append('<p class="same-list">Times are when each change was committed. To see the drawings of a change, '
              'use <b>Compare versions</b> and pick that commit.</p>')
-    h.append("</main><footer>PLC Diff %s · updated %s</footer><script>const DATA = %s;%s</script></body></html>" % (
-        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), data, HIST_JS))
+    h.append("</main><footer>PLC Diff %s · updated %s</footer><script>const DATA = %s; const REVIEWS = %s;%s</script></body></html>" % (
+        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), data, rdata, HIST_JS))
     return "".join(h)
 
 
@@ -2945,6 +3266,54 @@ def load_settings():
     return st
 
 
+UPDATE_URL = "https://api.github.com/repos/sandro91145/plc-diff/releases/latest"
+
+
+def vtuple(v):
+    return tuple(int(x) for x in re.findall(r"\d+", str(v))[:3]) or (0,)
+
+
+def check_update():
+    """The newest release on GitHub if it is newer than this copy: {version, url, page, notes} - else None.
+    Quiet on any error (no internet, company proxy, GitHub down)."""
+    import urllib.request
+    try:
+        req = urllib.request.Request(os.environ.get("PLCDIFF_UPDATE_URL", UPDATE_URL),
+                                     headers={"User-Agent": "PLC-Diff/" + VERSION, "Accept": "application/vnd.github+json"})
+        rel = json.loads(urllib.request.urlopen(req, timeout=6).read().decode("utf-8"))
+        ver = str(rel.get("tag_name", "")).lstrip("vV")
+        asset = next((a for a in rel.get("assets", []) if a.get("name") == "PLCDiff.pyw"), None)
+        if not ver or not asset or vtuple(ver) <= vtuple(VERSION):
+            return None
+        return {"version": ver, "url": asset.get("browser_download_url", ""), "page": rel.get("html_url", ""),
+                "notes": str(rel.get("body") or "")[:3000]}
+    except Exception:
+        return None
+
+
+def install_update(me, upd):
+    """Download the new PLCDiff.pyw, check it really is that version and compiles, keep the old one as .bak,
+    then replace this file. The running copy notices the new file and offers Restart now."""
+    import urllib.request
+    req = urllib.request.Request(upd["url"], headers={"User-Agent": "PLC-Diff/" + VERSION})
+    data = urllib.request.urlopen(req, timeout=60).read()
+    text = data.decode("utf-8-sig")
+    if ('VERSION = "%s"' % upd["version"]) not in text:
+        raise ValueError("The download is not PLC Diff %s." % upd["version"])
+    compile(text, "PLCDiff.pyw", "exec")
+    me = Path(me)
+    bak = me.with_name(me.name + ".bak")
+    tmp = me.with_name(me.name + ".new")
+    tmp.write_bytes(data)
+    try:
+        bak.write_bytes(me.read_bytes())
+        os.replace(str(tmp), str(me))
+    finally:
+        if tmp.exists():
+            tmp.unlink()
+    return str(me), str(bak)
+
+
 def save_settings(st):
     try:
         p = settings_path()
@@ -3025,6 +3394,53 @@ def find_tia_projects(root, max_depth=4):
 
     walk(root, 0)
     return hits
+
+
+def folder_files(folder):
+    """Export files below a folder: {relative path: file}."""
+    base = Path(folder)
+    out = {}
+    for f in base.rglob("*"):
+        if f.is_file() and (f.suffix.lower() == ".xml" or f.suffix.lower() in TEXT_EXT) and \
+                not any(x in (".git", ".plcdiff") for x in f.parts):
+            out[f.relative_to(base).as_posix()] = f
+    return out
+
+
+def compare_folders(a, b, safety_only=False):
+    """Two folders of TIA exports compared without Git (e.g. the customer's export against yours). Files are paired
+    by their path inside the folders; a file that only moved to another sub-folder is paired by its name."""
+    fa, fb = folder_files(a), folder_files(b)
+    pairs = [(p, p) for p in fa if p in fb]
+    only_a = [p for p in fa if p not in fb]
+    only_b = [p for p in fb if p not in fa]
+    by_name_b = defaultdict(list)
+    for p in only_b:
+        by_name_b[Path(p).name.lower()].append(p)
+    for p in list(only_a):
+        cand = by_name_b.get(Path(p).name.lower(), [])
+        if len(cand) == 1 and sum(1 for x in only_a if Path(x).name.lower() == Path(p).name.lower()) == 1:
+            pairs.append((p, cand[0]))
+            only_a.remove(p)
+            only_b.remove(cand[0])
+    items = [("M", x, y) for x, y in pairs] + [("D", x, x) for x in only_a] + [("A", y, y) for y in only_b]
+    reports, moved = [], 0
+    for st, op, np_ in sorted(items, key=lambda x: natkey(x[2])):
+        ob = fa[op].read_bytes() if st != "A" else None
+        nb = fb[np_].read_bytes() if st != "D" else None
+        if ob is not None and nb is not None and ob.replace(b"\r\n", b"\n") == nb.replace(b"\r\n", b"\n"):
+            moved += op != np_
+            continue
+        rep = diff_file(np_, "R" if st == "M" and op != np_ else st, ob, nb)
+        if rep.bullets or rep.textdiff or rep.error or any(n.status != "same" for n in rep.nets):
+            if safety_only and not rep.safety:
+                continue
+            reports.append(rep)
+    pa, pb = Path(a), Path(b)
+    meta = {"old_short": pa.name or str(pa), "old_desc": str(pa), "new_short": pb.name or str(pb), "new_desc": str(pb),
+            "repo": "Folder compare", "old_label": str(pa), "new_label": str(pb), "log": [], "view": "auto",
+            "moved": moved, "safety_only": safety_only, "folders": (len(fa), len(fb))}
+    return meta, reports
 
 
 def compute_reports(root, old, new, path=".", safety_only=False):
@@ -3369,6 +3785,58 @@ def init_repo(root):
     return ok, "\n".join(steps)
 
 
+# ---- review sign-off: one Git note per reviewed commit (refs/notes/plcdiff-review), shared on Push / Get latest
+REVIEW_REF = "plcdiff-review"
+
+
+def reviews_map(root):
+    """{full commit hash: [{who, date, note}]} for every reviewed commit."""
+    ok, out = run(root, ["git", "notes", "--ref=" + REVIEW_REF, "list"])
+    if not ok or not out.strip():
+        return {}
+    pairs = [l.split() for l in out.splitlines() if len(l.split()) == 2]
+    ok, blobs = run(root, ["git", "cat-file", "--batch"], inp="\n".join(n for n, _ in pairs) + "\n")
+    res, i, text = {}, 0, blobs if ok else ""
+    for note, commit in pairs:                   # cat-file --batch: "<id> blob <size>\n<content>\n" per object
+        j = text.find("\n", i)
+        if j < 0:
+            break
+        head = text[i:j].split()
+        size = int(head[2]) if len(head) == 3 and head[2].isdigit() else 0
+        body = text[j + 1:j + 1 + size]
+        i = j + 1 + size + 1
+        entries = []
+        for line in body.splitlines():
+            try:
+                e = json.loads(line)
+                if isinstance(e, dict) and e.get("who"):
+                    entries.append(e)
+            except ValueError:
+                if line.strip():
+                    entries.append({"who": "?", "date": "", "note": line.strip()})
+        if entries:
+            res[commit] = entries
+    return res
+
+
+def add_review(root, commit, who, note=""):
+    entry = json.dumps({"who": who, "date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), "note": note.strip()})      # ASCII only: cat-file sizes are bytes
+    return run(root, ["git", "notes", "--ref=" + REVIEW_REF, "append", "-m", entry, commit])
+
+
+def sync_reviews(root, push_too=False):
+    """Combine our reviews with the ones on GitHub (both kept), and send ours back when pushing."""
+    ok, _ = run(root, ["git", "fetch", "origin", "+refs/notes/%s:refs/notes/%s-theirs" % (REVIEW_REF, REVIEW_REF)], timeout=120)
+    if ok and rev_ok(root, "refs/notes/%s-theirs" % REVIEW_REF):
+        if rev_ok(root, "refs/notes/" + REVIEW_REF):
+            run(root, ["git", "notes", "--ref=" + REVIEW_REF, "merge", "-s", "cat_sort_uniq", "refs/notes/%s-theirs" % REVIEW_REF])
+        else:
+            run(root, ["git", "update-ref", "refs/notes/" + REVIEW_REF, "refs/notes/%s-theirs" % REVIEW_REF])
+    if push_too and rev_ok(root, "refs/notes/" + REVIEW_REF):
+        return run(root, ["git", "push", "origin", "refs/notes/%s:refs/notes/%s" % (REVIEW_REF, REVIEW_REF)], timeout=120)
+    return True, ""
+
+
 def _push_once(root):
     ok, up = run(root, ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"])
     if ok:
@@ -3389,6 +3857,7 @@ def pull(root):
         run(root, ["git", "branch", "--set-upstream-to=origin/%s" % br])
     ok, out = run(root, ["git", "pull", "--rebase", "--autostash"], timeout=300)
     if ok:
+        sync_reviews(root)
         return True, out
     if "CONFLICT" in out or "could not apply" in out or "Resolve all conflicts" in out:
         files = sorted(set(re.findall(r"CONFLICT \([^)]*\): (?:Merge conflict in )?(\S.*)", out)))
@@ -3402,14 +3871,14 @@ def pull(root):
 def push(root):
     """Push; if GitHub has newer commits from someone else, get them first and push again."""
     ok, out = _push_once(root)
-    if ok:
-        return ok, out
-    if any(x in out for x in ("rejected", "fetch first", "non-fast-forward", "Updates were rejected")):
+    if not ok and any(x in out for x in ("rejected", "fetch first", "non-fast-forward", "Updates were rejected")):
         ok, pout = pull(root)
         if not ok:
             return False, pout
-        return _push_once(root)
-    return False, out
+        ok, out = _push_once(root)
+    if ok:
+        sync_reviews(root, push_too=True)
+    return ok, out
 
 
 def clone(url, parent):
@@ -3441,6 +3910,7 @@ border-radius:8px;padding:7px 13px;cursor:pointer;white-space:nowrap}
 .btn.warn{background:#fff7ed;border-color:#fdba74;color:#9a3412}
 .btn.hot{background:#f59e0b;border-color:#f59e0b;color:#111}
 .newver{background:#fef3c7;color:#78350f;padding:8px 20px;display:flex;gap:12px;align-items:center;font-weight:600;font-size:13px;flex:none}
+.newver.upd{background:#e0f2fe;color:#0c4a6e;font-weight:400}.newver.upd b{font-weight:700}
 .plcsel{font:600 13px "Segoe UI",system-ui,sans-serif;background:#1e293b;color:#e2e8f0;border:1px solid #334155;border-radius:8px;padding:7px 10px;max-width:240px}
 .plcs{display:grid;grid-template-columns:minmax(0,1fr);gap:8px;margin:6px 0 12px}
 .plcrow{display:flex;gap:10px;align-items:center;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:8px 12px}
@@ -3465,6 +3935,14 @@ padding:16px 22px;font-size:14px;z-index:8;box-shadow:0 10px 40px rgba(15,23,42,
 .loading.on{display:block}.loading small{display:block;color:#94a3b8;margin-top:4px}
 .split{flex:1;min-height:0;display:grid;grid-template-columns:1fr 360px;grid-template-rows:minmax(0,1fr)}
 .split>.frame{height:100%}
+.split2{flex:1;min-height:0;display:grid;grid-template-columns:380px 1fr;grid-template-rows:minmax(0,1fr)}.split2>.frame{height:100%}
+.blist{border-right:1px solid var(--line);background:var(--card);overflow:auto;padding:10px}
+.blist .resgrp{margin:0 0 8px}.blist .resgrp>summary{padding:8px 10px}
+.brow{display:flex;gap:8px;align-items:baseline;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px}
+.brow:hover{background:#f1f5f9}.brow.sel{background:#ecfeff;outline:1px solid var(--accent)}
+.brow b{font-weight:600;overflow-wrap:anywhere}.brow small{color:var(--muted);font:11px Consolas,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1;direction:rtl;text-align:left}
+.brow a{color:var(--accent);font-size:12px;white-space:nowrap;text-decoration:none}
+@media (max-width:900px){.split2{grid-template-columns:1fr;grid-template-rows:40% 60%}}
 .side{border-left:1px solid var(--line);background:var(--card);padding:16px;overflow:auto;display:flex;flex-direction:column;gap:12px}
 .side h3{margin:0;font-size:13px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 textarea{width:100%;min-height:200px;font:12.5px/1.5 Consolas,monospace;border:1px solid var(--line);border-radius:8px;padding:10px;resize:vertical}
@@ -3540,6 +4018,7 @@ function loadFrame(id, url, msg){
   document.getElementById('loadmsg').textContent = msg || 'Comparing…';
   l.classList.add('on');
   f.onload = () => l.classList.remove('on');
+  f.removeAttribute('srcdoc');            // a hint page shown with srcdoc would hide the real page
   f.src = url;
 }
 let TAB = '';
@@ -3577,11 +4056,32 @@ function show(tab){
   if (tab === 'changes') loadChanges();
   if (tab === 'compare') loadRevs();
   if (tab === 'history') loadHistory();
+  if (tab === 'blocks') loadBlocksTab();
   if (tab === 'setup') loadSetup();
+}
+let UPD_LATER = false;
+async function updateNow(btn){
+  busy(btn, true, 'Downloading…');
+  const j = await api('/api/update', {});
+  busy(btn, false);
+  if (j.error) return toast(j.error, 'err', 20000);
+  toast('Updated. The old version is kept as ' + j.backup + '. Click Restart now.', 'ok', 20000);
+  refresh();
+}
+async function checkUpdate(btn, enabled){
+  busy(btn, true, 'Checking…');
+  const j = await api('/api/update', enabled === undefined ? {check: true, force: true} : {check: true, enabled});
+  busy(btn, false);
+  if (j.error) return toast(j.error, 'err');
+  if (enabled === undefined) toast(j.update ? 'PLC Diff ' + j.update.version + ' is available.' : 'You have the newest version.');
+  UPD_LATER = false; loadSetup();
 }
 async function refresh(){
   S = await api('/api/state');
   $('#newver').style.display = S.stale ? 'flex' : 'none';
+  const u = S.update;
+  $('#updbar').style.display = u && !S.stale && !UPD_LATER ? 'flex' : 'none';
+  if (u){ $('#updtxt').innerHTML = `<b>PLC Diff ${esc(u.version)}</b> is available (you have ${esc(S.version)}).`; $('#updnotes').href = u.page || '#'; }
   if (HOME) return S;
   const r = S.repo;
   $('#rname').textContent = r ? r.name : 'No folder chosen';
@@ -3851,10 +4351,89 @@ async function loadRevs(){
   $('#to').innerHTML = '<option value="WORK">Now (files on disk)</option><option value="HEAD">Last commit</option>' + opts;
   if (f) $('#from').value = f; if (t) $('#to').value = t; else $('#to').value = 'HEAD';
 }
+function toggleFolders(){ const p = $('#fldpanel'); p.hidden = !p.hidden; if (!p.hidden) $('#relpanel').hidden = true; }
+async function pickInto(id, btn){
+  busy(btn, true, 'Choose…'); const j = await api('/api/pick', {}); busy(btn, false);
+  if (j.error) return toast(j.error, 'err'); if (j.path) $('#' + id).value = j.path;
+}
+function doFolders(){
+  const a = $('#fld-a').value.trim(), b = $('#fld-b').value.trim();
+  if (!a || !b) return toast('Choose both folders first.', 'err');
+  loadFrame('cmp-frame', '/view/folders?t=' + T + '&a=' + encodeURIComponent(a) + '&b=' + encodeURIComponent(b) +
+    '&view=' + $('#view2').value + ($('#allnets2').checked ? '&all=1' : '') +
+    ($('#safe2').checked ? '&safety=1' : '') + ($('#sign2').checked ? '&signoff=1' : ''), 'Comparing the folders…');
+}
 function doCompare(){
   loadFrame('cmp-frame', '/view/report?old=' + encodeURIComponent($('#from').value) + '&new=' + encodeURIComponent($('#to').value) +
     '&t=' + T + '&view=' + $('#view2').value + ($('#allnets2').checked ? '&all=1' : '') + plcQ() +
     ($('#safe2').checked ? '&safety=1' : '') + ($('#sign2').checked ? '&signoff=1' : ''));
+}
+// ---------- blocks tab: every block of a version, drawn; its history; where a tag is used
+let BKS = [], BK_SEL = '';
+const BK_OPEN = new Set();
+const bkHint = msg => `<!doctype html><body style="font:14px Segoe UI,system-ui,sans-serif;color:#64748b;padding:40px;background:#f4f5f7">${msg}</body>`;
+async function loadBlocksTab(){
+  const j = await api('/api/revs');
+  if (j.error) return toast(j.error, 'err');
+  const cur = $('#bk-rev').value;
+  $('#bk-rev').innerHTML = '<option value="WORK">Now (files on disk)</option>' +
+    (j.revs || []).map(r => `<option value="${esc(r.hash)}">${esc(r.label)}</option>`).join('');
+  if (cur) $('#bk-rev').value = cur;
+  if (!BK_SEL) $('#bk-frame').srcdoc = bkHint('<b style="color:#0f172a">Click a block</b> to see it drawn, or <b style="color:#0f172a">History</b> for every change to it.<br><br>' +
+     'To find a tag, type it at the top right and press <b style="color:#0f172a">Find uses</b>.');
+  loadBlockList();
+}
+async function loadBlockList(){
+  $('#bk-list').innerHTML = '<div class="hint">Reading the blocks…</div>';
+  const j = await api('/api/blocks', {rev: $('#bk-rev').value});
+  if (j.error){ $('#bk-list').innerHTML = ''; return toast(j.error, 'err', 12000); }
+  BKS = j.blocks || [];
+  renderBlockList();
+}
+function renderBlockList(){
+  if (!BKS.length) return $('#bk-list').innerHTML = '<div class="hint">No exports in this version.</div>';
+  const q = ($('#bk-find').value || '').trim().toLowerCase();
+  const rows = BKS.filter(b => !q || b.name.toLowerCase().includes(q) || (b.dest || b.path).toLowerCase().includes(q));
+  if (!rows.length) return $('#bk-list').innerHTML = '<div class="hint">No block matches that.</div>';
+  const multi = new Set(rows.map(b => b.plc || '')).size > 1, groups = new Map();
+  for (const b of rows){
+    const k = (multi ? (b.plc || 'Other') + ' · ' : '') + (b.group || 'Other files');
+    if (!groups.has(k)) groups.set(k, {plc: b.plc || '', group: b.group || 'Other files', rows: []});
+    groups.get(k).rows.push(b);
+  }
+  const rank = g => { const i = RES_ORDER.indexOf(g.toLowerCase()); return i < 0 ? 99 : i; };
+  const keys = [...groups.keys()].sort((a, b) => { const x = groups.get(a), y = groups.get(b);
+    return x.plc.localeCompare(y.plc) || rank(x.group) - rank(y.group) || x.group.localeCompare(y.group); });
+  const openAll = !!q || keys.length === 1;
+  $('#bk-list').innerHTML = `<div class="hint">${rows.length} export${rows.length === 1 ? '' : 's'}</div>` + keys.map(k => {
+    const g = groups.get(k);
+    const items = g.rows.map(b => { const j = esc(JSON.stringify(b.path)), h = esc(JSON.stringify(b.dest || b.path));
+      return `<div class="brow${b.path === BK_SEL ? ' sel' : ''}" data-p="${esc(b.path)}" onclick='viewBk(${j})' title="${esc(b.dest || b.path)}">
+        <b>${esc(b.name)}</b><small><span dir="ltr">${esc(b.sub ? b.sub + '/' : '')}</span></small>
+        <a href="#" onclick='event.stopPropagation(); bkHistory(${h}, ${j}); return false'>History</a></div>`; }).join('');
+    return `<details class="resgrp" data-k="${esc(k)}" ontoggle="bkToggle(this)"${openAll || BK_OPEN.has(k) ? ' open' : ''}>
+      <summary><b>${esc(k)}</b><span>${g.rows.length}</span></summary>${items}</details>`; }).join('');
+}
+function bkToggle(el){ if ($('#bk-find').value.trim()) return; el.open ? BK_OPEN.add(el.dataset.k) : BK_OPEN.delete(el.dataset.k); }
+function bkSelect(path){
+  BK_SEL = path;
+  document.querySelectorAll('#bk-list .brow').forEach(r => r.classList.toggle('sel', r.dataset.p === path));
+}
+function viewBk(path){
+  bkSelect(path);
+  loadFrame('bk-frame', '/view/block?t=' + encodeURIComponent(T) + '&rev=' + encodeURIComponent($('#bk-rev').value) +
+            '&path=' + encodeURIComponent(path) + '&view=auto', 'Drawing the block…');
+}
+function bkHistory(dest, path){
+  bkSelect(path);
+  loadFrame('bk-frame', '/view/blockhistory?t=' + encodeURIComponent(T) + '&path=' + encodeURIComponent(dest), 'Reading the history…');
+}
+function whereUsed(){
+  const tag = ($('#wu-tag').value || '').trim();
+  if (tag.replace(/"/g, '').length < 2) return toast('Type at least 2 letters of a tag name.', 'err');
+  bkSelect('');
+  loadFrame('bk-frame', '/view/whereused?t=' + encodeURIComponent(T) + '&rev=' + encodeURIComponent($('#bk-rev').value) +
+            '&tag=' + encodeURIComponent(tag), 'Searching every block…');
 }
 // ---------- history
 function loadHistory(){ loadFrame('hist-frame', '/view/history?t=' + T + '&r=' + Date.now() + plcQ(), 'Reading the history…'); }
@@ -3866,6 +4445,11 @@ async function loadSetup(){
      <div class="t"><b>${title}</b><span>${desc}</span></div><div class="a">${action}</div></div>`;
   let h = '<div class="card"><h2>This PC</h2>';
   h += row('g', 'PLC Diff ' + esc(S.version || ''), esc(S.app_file || ''));
+  h += row(S.update ? 'y' : 'g', S.update ? 'PLC Diff ' + esc(S.update.version) + ' is available' : 'Updates',
+     S.update_check ? 'Looks for a new version on GitHub when PLC Diff starts.' : 'Not looking for new versions.',
+     `<button class="btn" onclick="checkUpdate(this)">Check now</button>` +
+     `<button class="btn" onclick="checkUpdate(this, ${S.update_check ? 'false' : 'true'})">${S.update_check ? 'Turn off' : 'Turn on'}</button>` +
+     (S.update ? `<button class="btn hot" onclick="updateNow(this)">Update now</button>` : ''));
   h += row(c.git ? 'g' : 'r', 'Git', c.git ? esc(c.git_version) : 'Not found. If Git Bash works on this PC, run <code>cygpath -w "$(which git)"</code> in Git Bash and paste the result here.',
      c.git ? '' : `<input type="text" id="gp" placeholder="C:\\Program Files\\Git\\cmd\\git.exe"><button class="btn pri" onclick="setGit(this)">Use this</button>`);
   h += row(c.lfs ? 'g' : 'y', 'Git LFS (for project archives)', c.lfs ? esc(c.lfs_version) : 'Not found — optional. It comes with Git for Windows.');
@@ -4106,10 +4690,15 @@ APP_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
 <div class="tabs" id="tabs" style="display:none">
   <div class="tab" data-t="changes" onclick="show('changes')">Changes <span class="pill" id="pill" style="display:none"></span></div>
   <div class="tab" data-t="compare" onclick="show('compare')">Compare versions</div>
+  <div class="tab" data-t="blocks" onclick="show('blocks')">Blocks</div>
   <div class="tab" data-t="history" onclick="show('history')">History</div>
   <div class="tab" data-t="setup" onclick="show('setup')">Setup</div></div>
 <div class="newver" id="newver" style="display:none">A newer version of PLC Diff is installed.
   <button class="btn hot" onclick="restartNow(this)">Restart now</button></div>
+<div class="newver upd" id="updbar" style="display:none"><span id="updtxt"></span>
+  <a class="btn" id="updnotes" target="_blank" rel="noopener">What's new</a>
+  <button class="btn hot" onclick="updateNow(this)">Update now</button>
+  <button class="btn" onclick="UPD_LATER = true; refresh()">Later</button></div>
 <section class="page" id="p-welcome"></section>
 <section class="page" id="p-changes">
   <div class="bar"><span id="ch-head" class="grow"></span>
@@ -4124,7 +4713,18 @@ APP_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
     <label class="ck" title="Show only failsafe blocks (F_LAD, F_FBD, F-DBs)"><input type="checkbox" id="safe2"> Only safety (F) blocks</label>
     <label class="ck" title="Add a review / signature section at the end, for printing"><input type="checkbox" id="sign2"> Sign-off sheet</label>
     <button class="btn pri" onclick="doCompare()">Compare</button>
-    <span class="grow"></span><button class="btn" onclick="toggleRelease()">Mark release…</button></div>
+    <span class="grow"></span><button class="btn" onclick="toggleFolders()">Compare two folders…</button>
+    <button class="btn" onclick="toggleRelease()">Mark release…</button></div>
+  <div class="relpanel" id="fldpanel" hidden>
+    <div class="msg info" style="font-size:12px;margin:0 0 10px">No Git needed: compare two folders of TIA exports, e.g. the
+      customer's export with yours, or a backup from site with this project. Files are matched by their place in the folder
+      (or by name if they moved). The options above (drawing, safety only, sign-off) apply here too.</div>
+    <div class="form">
+      <label>Before (old)<span class="row"><input id="fld-a" placeholder="e.g. D:\\Customer\\Export_2026-10"><button class="btn" onclick="pickInto('fld-a', this)">Choose…</button></span></label>
+      <label>After (new)<span class="row"><input id="fld-b" placeholder="e.g. D:\\Projects\\MyProject\\vci\\PLC_1"><button class="btn" onclick="pickInto('fld-b', this)">Choose…</button></span></label>
+    </div>
+    <div style="margin-top:10px"><button class="btn pri" onclick="doFolders()">Compare the folders</button> <button class="btn" onclick="toggleFolders()">Close</button></div>
+  </div>
   <div class="relpanel" id="relpanel" hidden>
     <div class="form">
       <label>Release name<input id="rel-name" list="rel-names" placeholder="e.g. FAT"><datalist id="rel-names">
@@ -4138,6 +4738,13 @@ APP_HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta n
     <div style="margin-top:10px"><button class="btn pri" onclick="makeRelease(this)">Mark release</button> <button class="btn" onclick="toggleRelease()">Cancel</button></div>
   </div>
   <iframe class="frame" id="cmp-frame"></iframe></section>
+<section class="page" id="p-blocks">
+  <div class="bar">Version <select id="bk-rev" onchange="loadBlockList()" style="max-width:360px"></select>
+    <input type="text" id="bk-find" placeholder="Find a block, e.g. Kette or FC_" oninput="renderBlockList()">
+    <span class="grow"></span>
+    <input type="text" id="wu-tag" style="width:300px" placeholder='Where is a tag used? e.g. "Q_Motor" or GM_RFK' onkeydown="if (event.key === 'Enter') whereUsed()">
+    <button class="btn pri" onclick="whereUsed()">Find uses</button></div>
+  <div class="split2"><div class="blist" id="bk-list"></div><iframe class="frame" id="bk-frame"></iframe></div></section>
 <section class="page" id="p-history">
   <div class="bar"><span class="grow">Every change, with the date and time it was committed.</span>
     <a class="btn" id="csv" href="#" onclick="this.href='/view/csv?t='+T">Download for Excel</a>
@@ -4183,7 +4790,13 @@ def run_app(port=0, open_browser=True):
     started_mtime = me.stat().st_mtime
     st = load_settings()
     token = secrets.token_hex(16)
-    state = {"repo": Path(st["last"]) if st.get("last") else None, "ping": time.time(), "lock": threading.Lock()}
+    state = {"repo": Path(st["last"]) if st.get("last") else None, "ping": time.time(), "lock": threading.Lock(),
+             "update": None}
+
+    def look_for_update():
+        if st.get("update_check", True):
+            state["update"] = check_update()
+    threading.Thread(target=look_for_update, daemon=True).start()
 
     def remember(p):
         rec = [x for x in st.get("recent", []) if x != str(p)]
@@ -4226,6 +4839,7 @@ def run_app(port=0, open_browser=True):
                 stale = False
             return {"repo": repo_info(r) if r else None, "tools": tool_checks(), "recent": st.get("recent", []),
                     "version": VERSION, "stale": stale, "app_file": str(me),
+                    "update": state["update"], "update_check": st.get("update_check", True),
                     "plc": cur_plc(), "home": str(Path.home()), "projects_count": len(st.get("projects", []))}
         if path == "/api/projects":
             out = []
@@ -4261,6 +4875,40 @@ def run_app(port=0, open_browser=True):
         if path == "/api/quit":
             state["quit"] = True
             return {"ok": True}
+        if path == "/api/review":
+            root = need_repo()
+            commit = str(body.get("commit") or "").strip()
+            if not commit or not rev_ok(root, commit):
+                return {"error": "That commit is not in this project."}
+            ok, who = run(root, ["git", "config", "user.name"])
+            if not ok or not who.strip():
+                return {"error": "Set your name in Setup first - the review is signed with it."}
+            full = git(root, "rev-parse", commit + "^{commit}").decode().strip()
+            with state["lock"]:
+                ok, out = add_review(root, full, who.strip(), str(body.get("note") or "")[:500])
+            if not ok:
+                return {"error": "Couldn't save the review: %s" % out[-300:]}
+            return {"ok": True, "reviews": reviews_map(root).get(full, []),
+                    "msg": "Saved. It goes to the team with your next Push."}
+        if path == "/api/update":
+            if body.get("check"):                         # Setup: "Check now" / switch the check on or off
+                if "enabled" in body:
+                    st["update_check"] = bool(body["enabled"])
+                    save_settings(st)
+                state["update"] = check_update() if st.get("update_check", True) or body.get("force") else None
+                return {"ok": True, "update": state["update"]}
+            upd = state["update"]
+            if not upd:
+                return {"error": "No newer version found."}
+            try:
+                written, bak = install_update(me, upd)
+            except PermissionError:
+                return {"error": "Couldn't write %s - the folder may be read-only. Download PLCDiff.pyw from %s and replace it "
+                                 "by hand." % (me, upd.get("page") or "GitHub")}
+            except Exception as ex:
+                return {"error": "The update didn't work (%s). Nothing was changed." % ex}
+            state["update"] = None
+            return {"ok": True, "written": written, "backup": bak}
         if path == "/api/restart":
             env = dict(os.environ, PLCDIFF_WAIT="1.5")
             flags = (0x00000008 | 0x00000200) if os.name == "nt" else 0      # detached, own process group
@@ -4477,7 +5125,8 @@ def run_app(port=0, open_browser=True):
             rev = str(body.get("rev") or "").strip()
             if not rev:
                 return {"error": "Choose a version first."}
-            if not rev_ok(root, rev):
+            rev = WORK if rev == "WORK" else rev
+            if rev != WORK and not rev_ok(root, rev):
                 return {"error": "That version is not in this project (any more)."}
             plc = cur_plc()
             prefixes, out = plc_prefixes(root), []
@@ -4660,22 +5309,63 @@ def run_app(port=0, open_browser=True):
                     return "text/html", ('<!doctype html><meta charset="utf-8"><body style="font:14px Segoe UI,sans-serif;'
                                          'padding:30px;color:#64748b">Not enough commits yet to compare (%s).</body>' % esc(r)).encode()
             plc = q.get("plc", [""])[0]
-            meta, reports = compute_reports(root, old, new, plc_paths(plc, root) if plc in list_plcs(root)[0] else ".",
+            only = [f for f in q.get("file", []) if f]               # one block's history: just that file
+            meta, reports = compute_reports(root, old, new, only or (plc_paths(plc, root) if plc in list_plcs(root)[0] else "."),
                                             safety_only=q.get("safety", ["0"])[0] == "1")
             meta["signoff"] = q.get("signoff", ["0"])[0] == "1"
             meta["view"] = q.get("view", ["auto"])[0]
+            meta["token"] = q.get("t", [""])[0]
+            rv = reviews_map(root)
+            if new != WORK:
+                full = git(root, "log", "--format=%H%x00%h", "%s..%s" % (old, new), check=False).decode("utf-8", "replace")
+                meta["reviews"] = {h_: rv[f] for f, _, h_ in (l.partition("\0") for l in full.splitlines()) if f in rv}
+                nfull = git(root, "rev-parse", new + "^{commit}", check=False).decode().strip()
+                if nfull in rv:
+                    meta["reviews"][meta["new_short"]] = rv[nfull]
             if plc:
                 meta["repo"] = "%s · %s" % (root.name, plc)
             return "text/html", build_html(meta, reports, q.get("all", ["0"])[0] == "1").encode("utf-8")
+        if path == "/view/folders":
+            fa, fb = q.get("a", [""])[0].strip().strip('"'), q.get("b", [""])[0].strip().strip('"')
+            bad = [x for x in (fa, fb) if not x or not Path(x).is_dir()]
+            if bad:
+                return "text/html", ('<!doctype html><meta charset="utf-8"><body style="font:14px Segoe UI,sans-serif;'
+                                     'padding:30px;color:#64748b">This folder doesn\'t exist: %s</body>' % esc(bad[0] or "(empty)")).encode()
+            meta, reports = compare_folders(fa, fb, safety_only=q.get("safety", ["0"])[0] == "1")
+            meta["signoff"] = q.get("signoff", ["0"])[0] == "1"
+            meta["view"] = q.get("view", ["auto"])[0]
+            return "text/html", build_html(meta, reports, q.get("all", ["0"])[0] == "1").encode("utf-8")
+        if path == "/view/blockhistory":
+            rel = q.get("path", [""])[0]
+            plc = cur_plc()
+            if rel not in {p for p, _ in blocks_at(root, WORK, plc_paths(plc, root))} | \
+                    ({p for p, _ in blocks_at(root, "HEAD", plc_paths(plc, root))} if rev_ok(root, "HEAD") else set()):
+                return "text/html", ('<!doctype html><meta charset="utf-8"><body style="font:14px Segoe UI,sans-serif;'
+                                     'padding:30px;color:#64748b">That block is not in this PLC.</body>').encode()
+            rows = block_history(root, rel) if rev_ok(root, "HEAD") else []
+            dirty = bool(git(root, "status", "--porcelain", "--", rel, check=False).strip())
+            return "text/html", build_blockhistory_html(Path(rel).stem, rel, rows, q.get("t", [""])[0], dirty).encode("utf-8")
+        if path == "/view/whereused":
+            rev, tag = q.get("rev", ["WORK"])[0], q.get("tag", [""])[0].strip()
+            rev = WORK if rev == "WORK" else rev
+            if rev != WORK and not rev_ok(root, rev):
+                return "text/html", b'<!doctype html><meta charset="utf-8"><body>That version is not in this project.</body>'
+            short, desc = ("now", "files on disk") if rev == WORK else rev_desc(root, rev)
+            meta = {"new_short": short, "new_desc": desc, "old_short": short, "old_desc": desc, "rev": "WORK" if rev == WORK else rev,
+                    "view": q.get("view", ["auto"])[0], "block_view": True}
+            hits = where_used(root, rev, plc_paths(cur_plc(), root), tag)
+            return "text/html", build_where_html(meta, tag, hits, q.get("t", [""])[0]).encode("utf-8")
         if path == "/view/block":
             rev, rel = q.get("rev", [""])[0], q.get("path", [""])[0]
+            rev = WORK if rev == "WORK" else rev
             plc = cur_plc()
-            if not rev or not rev_ok(root, rev) or rel not in {p for p, _ in blocks_at(root, rev, plc_paths(plc, root))}:
+            if not rev or (rev != WORK and not rev_ok(root, rev)) or \
+                    rel not in {p for p, _ in blocks_at(root, rev, plc_paths(plc, root))}:
                 return "text/html", ('<!doctype html><meta charset="utf-8"><body style="font:14px Segoe UI,sans-serif;'
                                      'padding:30px;color:#64748b">That block is not in that version.</body>').encode()
             data = read_rev(root, rev, rel)
             rep = diff_file(rel, "M", data, data)
-            short, desc = rev_desc(root, rev)
+            short, desc = ("now", "files on disk") if rev == WORK else rev_desc(root, rev)
             meta = {"new_short": short, "new_desc": desc, "old_short": short, "old_desc": desc,
                     "view": q.get("view", ["auto"])[0], "block_view": True}
             return "text/html", build_block_html(meta, rep).encode("utf-8")
@@ -4694,7 +5384,7 @@ def run_app(port=0, open_browser=True):
             rows = history_rows(con, root)
             n = con.execute("SELECT COUNT(*) FROM commits").fetchone()[0]
             con.close()
-            return "text/html", build_history_html(root.name, rows, n).encode("utf-8")
+            return "text/html", build_history_html(root.name, rows, n, reviews_map(root)).encode("utf-8")
         if path == "/view/csv":
             with state["lock"]:
                 con = update_history(root, quiet=True)
@@ -4832,6 +5522,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="PLCDiff", description="See TIA Portal block changes between Git versions.")
     ap.add_argument("revs", nargs="*", help="0, 1 or 2 versions (commit, tag, branch)")
     ap.add_argument("--files", nargs=2, metavar=("OLD", "NEW"), help="compare two export files directly")
+    ap.add_argument("--folders", nargs=2, metavar=("OLD", "NEW"), help="compare two folders of exports (no Git needed)")
     ap.add_argument("--all", action="store_true", help="also show unchanged networks of changed blocks")
     ap.add_argument("--text", action="store_true", help="only print the change log")
     ap.add_argument("--work", action="store_true", help="compare against the files on disk")
@@ -4857,7 +5548,13 @@ def main(argv=None):
         run_history(a)
         return
 
-    if a.files:
+    if a.folders:
+        for f in a.folders:
+            if not Path(f).is_dir():
+                sys.exit("PLC Diff: '%s' is not a folder." % f)
+        meta, reports = compare_folders(*a.folders)
+        slug = "folders"
+    elif a.files:
         po, pn = Path(a.files[0]), Path(a.files[1])
         rep = diff_file(pn.name, "M", po.read_bytes(), pn.read_bytes())
         reports = [rep] if (rep.bullets or rep.textdiff or any(n.status != "same" for n in rep.nets)) else []

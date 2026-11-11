@@ -96,6 +96,9 @@ WANT = [
     "network added",
     'NOT "I_ExtFault1" → "I_ExtFault1"',          # negated call input (FBD)
     "added reset coil (R)",                       # FBD coil
+    'input "I_Ready" → "I_ReadyOk"',              # FBD tag wired straight into a coil
+    "variable Static.Speed: Int := 1200 → Int := 1500",   # data block start value
+    "variable order changed - moved",             # data block member order (changes the layout)
 ]
 
 
@@ -130,6 +133,8 @@ def check_html(repo, tmp):
     say(groups == ["Program blocks", "PLC tags"], "changed files are grouped by TIA folder, in TIA's order", str(groups))
     first_tag = h.find('id="f', h.find('<details class="grp"', h.find('<details class="grp"') + 1))
     say(h.find("<summary>PLC tags<") < first_tag, "each file sits inside its folder's group")
+    say('<table class="mt">' in h and "1200" in h and "1500" in h and ">moved<" in h,
+        "data block changes are a table (start value, moved member)")
 
 
 def check_files_mode(repo, tmp):
@@ -192,7 +197,8 @@ def check_app(repo, tmp):
     # pick the throwaway project for the app, the way Setup -> Choose folder would
     (cfg / "plc-diff" / "settings.json").write_text(json.dumps(
         {"recent": [str(repo)], "projects": [str(repo)], "last": str(repo)}, indent=2), encoding="utf-8")
-    env = dict(os.environ, APPDATA=str(cfg), HOME=str(cfg), USERPROFILE=str(cfg))
+    env = dict(os.environ, APPDATA=str(cfg), HOME=str(cfg), USERPROFILE=str(cfg),
+               PLCDIFF_UPDATE_URL=(tmp / "no-such-release.json").as_uri())     # never ask the real GitHub
     port = free_port()
     proc = subprocess.Popen([PY, str(APP), "--app", "--port", str(port), "--no-browser"],
                             cwd=str(repo), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **NOWIN)
@@ -253,6 +259,28 @@ def check_app(repo, tmp):
         st, j = post("/api/restoreblock", {"rev": "HEAD~1", "path": "../outside.xml"})
         say(st == 200 and j.get("error") and not j.get("ok"), "a file outside the project is refused", str(j)[:200])
         runp(["git", "checkout", "--", rel], cwd=repo)
+        # --- Blocks tab
+        st, j = post("/api/blocks", {"rev": "WORK"})
+        say(st == 200 and "FC_Station" in [b["name"] for b in j.get("blocks", [])], "Blocks tab lists the files on disk", str(j)[:200])
+        st, body = get("/view/block?t=%s&rev=WORK&path=%s" % (token, urllib.request.quote(rel)))
+        say(st == 200 and "<svg" in body, "Blocks tab draws a block from the files on disk", body[:200])
+        st, body = get("/view/blockhistory?t=%s&path=%s" % (token, urllib.request.quote(rel)))
+        say(st == 200 and body.count("<tr>") >= 2 and "What changed" in body and "first export" in body,
+            "a block's history lists its commits with links", body[-400:])
+        st, body = get("/view/report?t=%s&old=HEAD~1&new=HEAD&file=%s" % (token, urllib.request.quote(rel)))
+        say(st == 200 and "FC_Station" in body and "Station1_IO" not in body, "'What changed' shows only that block", body[:200])
+        st, body = get("/view/whereused?t=%s&rev=HEAD&tag=%s" % (token, urllib.request.quote('"I_DoorClosed"')))
+        say(st == 200 and "FC_Station" in body and "Station1_IO" in body and "<svg" in body,
+            "Where is this tag used finds the network and the tag table", body[:300])
+        st, j = post("/api/review", {"commit": "HEAD", "note": "smoke"})
+        say(st == 200 and j.get("ok") and [e["who"] for e in j.get("reviews", [])] == ["Smoke"],
+            "Mark as reviewed signs the commit with the Git name", str(j)[:200])
+        st, body = get("/view/history?t=%s" % token)
+        say(st == 200 and '"who": "Smoke"' in body, "the history page shows the review", body[-300:])
+        st, body = get("/view/report?t=%s&old=HEAD~1&new=HEAD" % token)
+        say(st == 200 and "reviewed by Smoke" in body, "the compare page shows the review", body[:300])
+        st, body = get("/view/whereused?t=%s&rev=HEAD&tag=NoSuchTagAnywhere" % token)
+        say(st == 200 and "No block" in body, "Where is this tag used says when nothing uses it", body[:200])
         st, body = get("/view/block?t=%s&rev=HEAD~1&path=%s" % (token, urllib.request.quote(rel)))
         say(st == 200 and "<svg" in body and "FC_Station" in body and "badge" not in body.split("<main>")[-1][:2000],
             "View draws a whole block as it was in a version", body[:200])
@@ -355,6 +383,108 @@ def check_labels_fit():
     say(keys == ["Input.Start"], "a block interface member keeps its section", str(keys))
 
 
+# --- 9. exports TIA only rewrote ----------------------------------------------------------------
+def check_rewritten(tmp):
+    print("Exports TIA only rewrote")
+    d = tmp / "rewritten"
+    d.mkdir()
+    runp([PY, SAMPLES, d, "old"])
+    src = next(d.rglob("FC_Alarms.xml"))
+    text = src.read_text(encoding="utf-8")
+    ren = re.sub(r'UId="(\d+)"', lambda m: 'UId="%d"' % (int(m.group(1)) + 1000), text)
+    (d / "renumbered.xml").write_text(ren, encoding="utf-8")
+    code, out = app("--files", src, d / "renumbered.xml", "--text", "--no-open")
+    say("no logic change" in out and "text changed" not in out,
+        "a block TIA only renumbered says 'no logic change'", out[-300:])
+    (d / "attr.xml").write_text(text.replace('<Engineering version="V20" />', '<Engineering version="V20 Upd1" />'),
+                                encoding="utf-8")
+    code, out = app("--files", src, d / "attr.xml", "--text", "--no-open")
+    say("nothing the drawing shows changed" in out, "a change outside the drawing is still reported", out[-300:])
+
+
+# --- 10. folders, updates, reviews --------------------------------------------------------------
+def check_folders(tmp):
+    print("Compare two folders (no Git)")
+    a, b = tmp / "fold-old", tmp / "fold-new"
+    runp([PY, SAMPLES, a, "old"])
+    runp([PY, SAMPLES, b, "new"])
+    code, out = app("--folders", a, b, "--text", "--no-open")
+    say(code == 0 and 'added contact "I_DoorClosed"' in out and "variable added: Static.Limit" in out,
+        "two folders are compared like two versions", out[-300:])
+    code, out = app("--folders", a, a, "--no-open", "--out", tmp / "same.html")
+    page = (tmp / "same.html").read_text(encoding="utf-8") if (tmp / "same.html").exists() else ""
+    say("same exports" in page, "two equal folders say so", page[-300:])
+
+
+def _load_app(name):
+    import importlib.machinery, importlib.util
+    loader = importlib.machinery.SourceFileLoader(name, str(APP))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    pd = importlib.util.module_from_spec(spec)
+    loader.exec_module(pd)
+    return pd
+
+
+def check_update(tmp):
+    print("Update from GitHub (with a local stand-in for GitHub)")
+    pd = _load_app("plcdiff_update")
+    d = tmp / "upd"
+    d.mkdir()
+    newer = APP.read_text(encoding="utf-8").replace('VERSION = "%s"' % pd.VERSION, 'VERSION = "99.0.0"', 1)
+    (d / "PLCDiff.pyw").write_text(newer, encoding="utf-8")
+    rel = {"tag_name": "v99.0.0", "html_url": "https://example.invalid", "body": "test",
+           "assets": [{"name": "PLCDiff.pyw", "browser_download_url": (d / "PLCDiff.pyw").as_uri()}]}
+    (d / "latest.json").write_text(json.dumps(rel), encoding="utf-8")
+    os.environ["PLCDIFF_UPDATE_URL"] = (d / "latest.json").as_uri()
+    try:
+        upd = pd.check_update()
+        say(bool(upd) and upd["version"] == "99.0.0", "a newer release is found", str(upd)[:200])
+        installed = d / "installed" / "PLCDiff.pyw"
+        installed.parent.mkdir()
+        installed.write_text(APP.read_text(encoding="utf-8"), encoding="utf-8")
+        pd.install_update(installed, upd)
+        say('VERSION = "99.0.0"' in installed.read_text(encoding="utf-8") and
+            installed.with_name("PLCDiff.pyw.bak").exists(), "the update replaces the file and keeps a backup")
+        bad = dict(upd, version="99.0.1")
+        before = installed.read_bytes()
+        try:
+            pd.install_update(installed, bad)
+            say(False, "a download of the wrong version is refused")
+        except ValueError:
+            say(installed.read_bytes() == before, "a download of the wrong version is refused, nothing changed")
+        rel["tag_name"] = "v" + pd.VERSION
+        (d / "latest.json").write_text(json.dumps(rel), encoding="utf-8")
+        say(pd.check_update() is None, "no update offered when already up to date")
+    finally:
+        os.environ.pop("PLCDIFF_UPDATE_URL", None)
+
+
+def check_reviews(tmp):
+    print("Review sign-off shared through Git")
+    pd = _load_app("plcdiff_reviews")
+    d = tmp / "team"
+    d.mkdir()
+    env = dict(os.environ, GIT_AUTHOR_NAME="Smoke", GIT_AUTHOR_EMAIL="smoke@test",
+               GIT_COMMITTER_NAME="Smoke", GIT_COMMITTER_EMAIL="smoke@test")
+    runp(["git", "init", "-q", "--bare", "origin.git"], cwd=d, env=env)
+    runp(["git", "clone", "-q", "origin.git", "A"], cwd=d, env=env)
+    a, b = d / "A", d / "B"
+    runp([PY, SAMPLES, a, "old"])
+    for args in (["add", "-A"], ["commit", "-q", "-m", "first"], ["push", "-q", "origin", "HEAD"]):
+        runp(["git"] + args, cwd=a, env=env)
+    runp(["git", "clone", "-q", "origin.git", "B"], cwd=d, env=env)
+    head = pd.git(a, "rev-parse", "HEAD").decode().strip()
+    pd.add_review(a, head, "Ana", "checked")
+    pd.add_review(b, head, "Bruno", "ok")             # both review the same commit before syncing
+    pd.push(a)
+    pd.push(b)
+    pd.pull(a)
+    ra = [e["who"] for e in pd.reviews_map(a).get(head, [])]
+    rb = [e["who"] for e in pd.reviews_map(b).get(head, [])]
+    say(sorted(ra) == ["Ana", "Bruno"] and sorted(rb) == ["Ana", "Bruno"],
+        "two people's reviews of the same commit are both kept and shared", "A=%s B=%s" % (ra, rb))
+
+
 def main():
     keep = "--keep" in sys.argv
     print("PLC Diff smoke test - %s" % APP)
@@ -376,6 +506,10 @@ def main():
         check_history(repo, tmp)
         check_moved_plc(tmp)
         check_labels_fit()
+        check_rewritten(tmp)
+        check_folders(tmp)
+        check_update(tmp)
+        check_reviews(tmp)
         if "--no-app" not in sys.argv:
             check_app(repo, tmp)
         else:
