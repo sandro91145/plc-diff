@@ -2018,6 +2018,25 @@ table.bh td{padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px;
 table.bh a{color:var(--accent);text-decoration:none;white-space:nowrap}table.bh tr.now td{background:#fffbeb}
 .commits .rvok{color:#86efac;font-size:12px}.commits .rvno{color:#94a3b8;font-size:12px}.commits .rvno a{color:#67e8f9}
 .signoff td.rv{font-size:13px;padding:6px 8px;color:#0f172a}
+.layout{display:grid;grid-template-columns:300px minmax(0,1fr);align-items:start}.layout>main{margin:0;max-width:1500px}
+.sidenav{position:sticky;top:0;max-height:100vh;overflow:auto;padding:22px 8px 40px 18px;font-size:13px}
+.sidenav .snh{display:flex;flex-direction:column;gap:2px;margin:0 0 10px 6px}.sidenav .snh b{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.sidenav .snh a{color:var(--accent);cursor:pointer;font-size:12px}
+.sidenav details{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:0 0 8px;padding:4px}
+.sidenav summary{cursor:pointer;font-weight:600;padding:6px 8px;color:var(--ink);font-size:13px}.sidenav summary span{color:var(--muted);font-weight:400;margin-left:6px}
+.sidenav a[data-f]{display:block;padding:5px 8px;border-radius:6px;color:var(--ink);text-decoration:none;line-height:1.3}
+.sidenav a[data-f]:hover{background:#f1f5f9}.sidenav a[data-f].on{background:#ecfeff;box-shadow:inset 3px 0 0 var(--accent)}
+.sidenav a[data-f] b{font-weight:500;overflow-wrap:anywhere}.sidenav a[data-f] small{display:block;color:var(--muted);font-size:11px}
+.sidenav .snlist{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:4px}
+@media (min-width:961px){.layout .toc{display:none}}
+@media (max-width:960px){.layout{display:block}.sidenav{display:none}}
+@media (max-width:1300px){.layout{grid-template-columns:240px minmax(0,1fr)}}
+.ztools{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 6px;font-size:12px;color:var(--muted)}
+.ztools button{font:600 12px "Segoe UI",sans-serif;border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 9px;cursor:pointer;color:var(--ink)}
+.ztools button.zc{background:var(--chgbg);border-color:#fcd34d;min-width:26px}.ztools .zh{margin-left:6px}
+.ztools[data-m="fit"] .zb[data-a="fit"],.ztools[data-m="full"] .zb[data-a="full"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.ladwrap.zfit svg{cursor:zoom-in}.ladwrap.zfull{max-height:78vh;overflow:auto}
+rect.zpulse{animation:zp .5s ease-in-out 3}@keyframes zp{50%{stroke-width:6}}
 .nochange{background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;border-radius:8px;padding:10px 14px;margin:4px 0 10px;font-size:13px}
 .toc .tg{list-style:none;margin:8px 0 2px -18px;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
 .toc .tools{float:right;font-size:12px}.toc .tools a{color:var(--accent);margin-left:12px;cursor:pointer}
@@ -2087,7 +2106,8 @@ display:flex;flex-direction:column;gap:2px}.safetybar small{color:#991b1b}
   body{background:#fff}header{background:#fff;color:#0f172a;border-bottom:2px solid #0f172a;padding:10px 0}
   header h1{color:#0f172a}.rev{background:#fff;border-color:#cbd5e1;color:#0f172a}.rev code{color:#0f172a}
   .commits{color:#334155}.commits code{color:#0f172a}.brand{color:#0e7490}
-  .printbtn,.legend span:last-child,details summary,.toc .tools{display:none}
+  .printbtn,.legend span:last-child,details summary,.toc .tools,.sidenav,.ztools{display:none}
+  .layout{display:block}.layout .toc{display:block}.ladwrap.zfull{max-height:none}
   details.grp>summary{display:flex;border:0;border-bottom:2px solid #0f172a;border-radius:0;padding:6px 0}details.grp>summary:before{content:""}
   main{padding:10px 0;max-width:none}.ladwrap{overflow:visible;border:0;padding:0}svg.lad{max-width:100%;height:auto}
   .net{break-inside:avoid}.file{break-inside:auto;border:1px solid #cbd5e1}.toc{break-after:avoid}
@@ -2186,11 +2206,70 @@ GROUP_JS = """<script>
 function openTo(id){ const el = document.getElementById(id); if (!el) return;
   for (let d = el.closest('details'); d; d = d.parentElement && d.parentElement.closest('details')) d.open = true;
   el.scrollIntoView(); }
-document.querySelectorAll('.toc li a').forEach(a => a.addEventListener('click', e => { e.preventDefault();
+document.querySelectorAll('.toc li a, .sidenav a[data-f]').forEach(a => a.addEventListener('click', e => { e.preventDefault();
   const id = a.getAttribute('href').slice(1); openTo(id); history.replaceState(null, '', '#' + id); }));
 function allGroups(open){ document.querySelectorAll('details.grp').forEach(d => d.open = open); }
 if (location.hash) openTo(location.hash.slice(1));
 window.addEventListener('beforeprint', () => allGroups(true));
+if (window.IntersectionObserver && document.querySelector('.sidenav')){     // mark the file you are looking at
+  const seen = new Map();
+  const io = new IntersectionObserver(es => { es.forEach(e => seen.set(e.target.id, e.isIntersecting ? e.boundingClientRect.top : null));
+    const vis = [...seen].filter(([, t]) => t !== null).sort((a, b) => a[1] - b[1])[0];
+    if (!vis) return;
+    document.querySelectorAll('.sidenav a.on').forEach(a => a.classList.remove('on'));
+    const a = document.querySelector('.sidenav a[data-f="' + vis[0] + '"]');
+    if (a){ a.classList.add('on'); const sn = a.closest('.sidenav'), r = a.getBoundingClientRect(), b = sn.getBoundingClientRect();
+      if (r.top < b.top || r.bottom > b.bottom) a.scrollIntoView({block: 'nearest'}); } }, {rootMargin: '0px 0px -60% 0px'});
+  document.querySelectorAll('article.file').forEach(f => io.observe(f));
+}
+</script>"""
+
+
+ZOOM_JS = """<script>
+// Big drawings start zoomed out so the whole network / step chain is visible with its changes highlighted.
+// Click a place (or a numbered change) to see it at full size; "Whole drawing" zooms out again.
+(function(){
+  const MARK = new Set(['#16a34a', '#dc2626', '#d97706']);
+  function setup(w){
+    const svg = w.querySelector(':scope > svg'); if (!svg || w.dataset.z) return;
+    w.dataset.z = '1';
+    const W = +svg.getAttribute('width'), H = +svg.getAttribute('height'), avail = w.clientWidth - 14;
+    if (!W || !avail || (W <= avail && H <= 720)) return;
+    const s = Math.min(avail / W, 640 / H, 1);
+    if (s > 0.92) return;
+    const pos = el => { const a = el.getBoundingClientRect(), b = svg.getBoundingClientRect(), k = W / b.width;
+      return [(a.left - b.left + a.width / 2) * k, (a.top - b.top + a.height / 2) * k]; };
+    const marks = [...svg.querySelectorAll('rect')].filter(r => MARK.has((r.getAttribute('stroke') || '').toLowerCase()) &&
+      (+r.getAttribute('width')) * (+r.getAttribute('height')) < 0.5 * W * H)
+      .map(r => [r, pos(r)]).sort((a, b) => a[1][1] - b[1][1] || a[1][0] - b[1][0]).map(x => x[0]);   // top to bottom
+    const bar = document.createElement('div'); bar.className = 'ztools';
+    const few = marks.length && marks.length <= 15;
+    bar.innerHTML = '<button class="zb" data-a="fit">Whole drawing</button><button class="zb" data-a="full">Full size</button>' +
+      (few ? '<span>Go to change:</span>' + marks.map((m, i) => '<button class="zc" data-i="' + i + '">' + (i + 1) + '</button>').join('')
+           : marks.length ? '<span>' + marks.length + ' highlighted parts.</span>' : '') +
+      '<span class="zh">Click the drawing to zoom in there.</span>';
+    w.before(bar);
+    const fit = () => { w.classList.remove('zfull'); w.classList.add('zfit'); svg.style.width = W * s + 'px'; svg.style.height = H * s + 'px';
+      bar.dataset.m = 'fit'; };
+    const full = (x, y) => { w.classList.remove('zfit'); w.classList.add('zfull'); svg.style.width = W + 'px'; svg.style.height = H + 'px';
+      bar.dataset.m = 'full';
+      if (x !== undefined){ w.scrollLeft = x - w.clientWidth / 2; w.scrollTop = y - w.clientHeight / 2; w.scrollIntoView({block: 'nearest'}); } };
+    svg.addEventListener('click', e => { if (!w.classList.contains('zfit')) return;
+      const b = svg.getBoundingClientRect(), k = W / b.width; full((e.clientX - b.left) * k, (e.clientY - b.top) * k); });
+    bar.addEventListener('click', e => { const t = e.target.closest('button'); if (!t) return;
+      if (t.dataset.a === 'fit') fit(); else if (t.dataset.a === 'full') full();
+      else { const m = marks[+t.dataset.i]; const xy = pos(m); full(xy[0], xy[1]);
+             m.classList.add('zpulse'); setTimeout(() => m.classList.remove('zpulse'), 1600); } });
+    fit();
+  }
+  const go = () => document.querySelectorAll('.ladwrap').forEach(w => { if (w.offsetParent !== null) setup(w); });
+  if (window.IntersectionObserver){
+    const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting){ setup(e.target); io.unobserve(e.target); } }),
+                                        {rootMargin: '300px'});
+    document.querySelectorAll('.ladwrap').forEach(w => io.observe(w));
+  } else go();
+  window.addEventListener('beforeprint', () => document.querySelectorAll('.ladwrap svg').forEach(v => { v.style.width = ''; v.style.height = ''; }));
+})();
 </script>"""
 
 
@@ -2225,8 +2304,8 @@ def build_block_html(meta, rep):
             h.append(tbl or '<div class="nothing">No members.</div>')
         if rows or doc.kind not in ("data", "udt"):
             h.append('<pre class="code">%s</pre>' % esc("\n".join(rows) or "(nothing to show)"))
-    h.append("</div></article></main><footer>PLC Diff %s · generated %s</footer></body></html>" % (
-        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
+    h.append("</div></article></main><footer>PLC Diff %s · generated %s</footer>%s</body></html>" % (
+        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), ZOOM_JS))
     return "".join(h)
 
 
@@ -2269,8 +2348,9 @@ def _page(title, brand, h1, sub, body):
             '<meta name="viewport" content="width=device-width,initial-scale=1"><title>PLC Diff · %s</title><style>%s</style>'
             '</head><body><header><button class="printbtn" onclick="window.print()">Print / save as PDF</button>'
             '<div class="brand">PLC Diff · %s</div><h1>%s</h1>%s</header><main>%s</main>'
-            '<footer>PLC Diff %s · generated %s</footer></body></html>' % (
-                esc(title), CSS, esc(brand), esc(h1), sub, body, VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
+            '<footer>PLC Diff %s · generated %s</footer>%s</body></html>' % (
+                esc(title), CSS, esc(brand), esc(h1), sub, body, VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                ZOOM_JS))
 
 
 def build_where_html(meta, tag, hits, token):
@@ -2386,9 +2466,11 @@ def build_html(meta, reports, show_all):
         h.append('<nav class="toc">%s<h2>%d file%s changed</h2><ul>' % (
             '<span class="tools"><a onclick="allGroups(true)">Open all</a><a onclick="allGroups(false)">Close all</a></span>'
             if grouped else "", len(reports), "" if len(reports) == 1 else "s"))
+        side = []                                   # the same list, as a sidebar next to the report
         for label, items in groups:
             if grouped:
                 h.append('<li class="tg">%s · %d</li>' % (esc(label), len(items)))
+                side.append('<details open><summary>%s<span>%d</span></summary>' % (esc(label), len(items)))
             for i, r in items:
                 doc = r.doc
                 nm = doc.name if doc else Path(r.path).name
@@ -2400,7 +2482,15 @@ def build_html(meta, reports, show_all):
                     extra = ", ".join(x for x in [extra, "%d other change%s" % (len(r.bullets), "" if len(r.bullets) == 1 else "s")] if x)
                 h.append('<li><a href="#f%d">%s</a>%s<span class="count">%s</span></li>' % (
                     i, esc(nm), ' <span class="sbadge">SAFETY</span>' if r.safety else "", esc(extra)))
+                side.append('<a href="#f%d" data-f="f%d"><b>%s</b>%s<small>%s</small></a>' % (
+                    i, i, esc(nm), ' <span class="sbadge">SAFETY</span>' if r.safety else "", esc(extra)))
+            if grouped:
+                side.append("</details>")
         h.append("</ul></nav>")
+        meta["_side"] = ('<aside class="sidenav"><div class="snh"><b>%d file%s changed</b>%s</div>%s</aside>' % (
+            len(reports), "" if len(reports) == 1 else "s",
+            '<span><a onclick="allGroups(true)">Open all</a> · <a onclick="allGroups(false)">Close all</a></span>' if grouped else "",
+            "".join(side) if grouped else '<div class="snlist">%s</div>' % "".join(side)))
         starts = {items[0][0]: (label, items) for label, items in groups} if grouped else {}
         ends = {items[-1][0] for _, items in groups} if grouped else set()
         for i, r in [x for _, items in groups for x in items]:
@@ -2463,9 +2553,14 @@ def build_html(meta, reports, show_all):
   if (note === null) return; const r = await fetch('/api/review', {method: 'POST', headers: {'X-Token': %s,
   'Content-Type': 'application/json'}, body: JSON.stringify({commit: c, note})}); const j = await r.json().catch(() => ({}));
   if (j.error) return alert(j.error); location.reload(); }</script>""" % json.dumps(meta["token"])) if meta.get("token") else ""
-    h.append("</main><footer>PLC Diff %s · generated %s</footer>%s%s</body></html>" % (
-        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), GROUP_JS if reports else "", review_js))
-    return "".join(h)
+    h.append("</main><footer>PLC Diff %s · generated %s</footer>%s%s%s</body></html>" % (
+        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), GROUP_JS if reports else "", ZOOM_JS, review_js))
+    page = "".join(h)
+    side = meta.pop("_side", "")
+    if side:
+        page = page.replace("</header><main>", '</header><div class="layout">%s<main>' % side, 1) \
+                   .replace("</main><footer>", "</main></div><footer>", 1)
+    return page
 
 
 # =============================================================================

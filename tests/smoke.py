@@ -135,6 +135,10 @@ def check_html(repo, tmp):
     say(h.find("<summary>PLC tags<") < first_tag, "each file sits inside its folder's group")
     say('<table class="mt">' in h and "1200" in h and "1500" in h and ">moved<" in h,
         "data block changes are a table (start value, moved member)")
+    side = h[h.find('<aside class="sidenav">'):h.find("</aside>")]
+    say(side.count('data-f="f') == h.count('<article class="file') >= 3 and "<details open>" in side,
+        "the sidebar lists every changed file, grouped by TIA folder")
+    say("Whole drawing" in h and "zfit" in h, "big drawings get the zoom-out / zoom-in tools")
 
 
 def check_files_mode(repo, tmp):
