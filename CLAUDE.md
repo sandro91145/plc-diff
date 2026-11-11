@@ -119,12 +119,14 @@ blocks,restoreblock,explore,quit,restart}`; GET `/view/block?rev=&path=` draws o
 - FBD coil / instance names above a box were centred on the box and cut off when longer than the drawing (left
   for a coil with nothing in front, right otherwise) → `fbd_boxlike` keeps the label inside and widens the drawing;
   names are shortened in the middle (`tmid`) so the end stays visible. Checked on 4,384 real networks: none overflow.
+- Data type (UDT) members showed as `None.Member`: TIA calls a UDT's only section "None" → `iface_members` leaves
+  that section name out (block interfaces keep `Input.`, `Static.` …).
 - Iframe height in CSS grid (150 px default) → `grid-template-rows:minmax(0,1fr)` + `height:100%`.
 
 
 ## 8. How we test
 
-- **`python tests/smoke.py` runs the whole checklist below in one go** (57 checks, ~20 s): both files compile,
+- **`python tests/smoke.py` runs the whole checklist below in one go** (59 checks, ~20 s): both files compile,
   a throwaway Git repo is built from the samples, the compare finds every kind of change (tag, interface, contact,
   box pin, call parameter, negated input, added/removed network), the HTML page really contains drawings and print
   CSS, `--files` / `--work` / `--history` work, the CSV has the BOM and `;` Excel needs, and the app itself starts,

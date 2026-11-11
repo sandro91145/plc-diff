@@ -344,6 +344,15 @@ def check_labels_fit():
         ok = all(x >= 0 for x in xs) and b.w >= max(xs) + pd.tw(lab)
         say(ok, "%s: the label starts inside and the drawing is wide enough" % case, "w=%.0f xs=%s" % (b.w, xs))
         say(name[-10:] in pd.tmid(name, 44), "%s: the end of a long name stays visible" % case)
+    print("Data type members")
+    iface = pd.ET.fromstring('<Interface><Sections><Section Name="None"><Member Name="Speed" Datatype="Int"/>'
+                             '</Section></Sections></Interface>')
+    keys = list(pd.iface_members(iface))
+    say(keys == ["Speed"], 'a data type member is called "Speed", not "None.Speed"', str(keys))
+    iface = pd.ET.fromstring('<Interface><Sections><Section Name="Input"><Member Name="Start" Datatype="Bool"/>'
+                             '</Section></Sections></Interface>')
+    keys = list(pd.iface_members(iface))
+    say(keys == ["Input.Start"], "a block interface member keeps its section", str(keys))
 
 
 def main():

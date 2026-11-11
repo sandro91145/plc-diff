@@ -726,7 +726,8 @@ def iface_members(iface):
         name = prefix + (m.get("Name") or "?")
         dt = m.get("Datatype", "")
         sv = ktext(m, "StartValue")
-        out["%s.%s" % (sec, name)] = dt + (" := %s" % sv if sv else "")
+        key = name if sec in ("None", "") else "%s.%s" % (sec, name)   # data types: TIA's section is called "None"
+        out[key] = dt + (" := %s" % sv if sv else "")
         for sub in kids(m, "Member"):
             walk(sub, sec, name + ".")
 
