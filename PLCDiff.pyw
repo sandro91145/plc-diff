@@ -726,7 +726,8 @@ def iface_members(iface):
         name = prefix + (m.get("Name") or "?")
         dt = m.get("Datatype", "")
         sv = ktext(m, "StartValue")
-        out["%s.%s" % (sec, name)] = dt + (" := %s" % sv if sv else "")
+        key = name if sec in ("None", "") else "%s.%s" % (sec, name)   # data types: TIA's section is called "None"
+        out[key] = dt + (" := %s" % sv if sv else "")
         for sub in kids(m, "Member"):
             walk(sub, sec, name + ".")
 
@@ -1947,6 +1948,14 @@ main{max-width:1500px;margin:0 auto;padding:22px 28px 60px}
 .toc h2{font-size:13px;margin:0 0 8px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
 .toc a{color:var(--ink);text-decoration:none}.toc a:hover{color:var(--accent)}
 .toc li{margin:3px 0}.toc ul{margin:0;padding-left:18px}
+.toc .tg{list-style:none;margin:8px 0 2px -18px;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.toc .tools{float:right;font-size:12px}.toc .tools a{color:var(--accent);margin-left:12px;cursor:pointer}
+details.grp{margin:0 0 14px}details.grp>summary{list-style:none;cursor:pointer;background:var(--card);border:1px solid var(--line);
+border-radius:10px;padding:12px 16px;font-size:15px;color:var(--ink);font-weight:600;display:flex;gap:10px;align-items:center}
+details.grp>summary::-webkit-details-marker{display:none}
+details.grp>summary:before{content:"▸";color:var(--muted);width:12px}details.grp[open]>summary:before{content:"▾"}
+details.grp>summary .count{color:var(--muted);font-weight:400;font-size:13px}
+details.grp[open]>summary{margin-bottom:12px}
 .count{color:var(--muted);font-size:12px;margin-left:6px}
 .file{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:26px;overflow:hidden}
 .file>.fh{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;align-items:baseline;gap:10px}
@@ -2007,7 +2016,8 @@ display:flex;flex-direction:column;gap:2px}.safetybar small{color:#991b1b}
   body{background:#fff}header{background:#fff;color:#0f172a;border-bottom:2px solid #0f172a;padding:10px 0}
   header h1{color:#0f172a}.rev{background:#fff;border-color:#cbd5e1;color:#0f172a}.rev code{color:#0f172a}
   .commits{color:#334155}.commits code{color:#0f172a}.brand{color:#0e7490}
-  .printbtn,.legend span:last-child,details summary{display:none}
+  .printbtn,.legend span:last-child,details summary,.toc .tools{display:none}
+  details.grp>summary{display:flex;border:0;border-bottom:2px solid #0f172a;border-radius:0;padding:6px 0}details.grp>summary:before{content:""}
   main{padding:10px 0;max-width:none}.ladwrap{overflow:visible;border:0;padding:0}svg.lad{max-width:100%;height:auto}
   .net{break-inside:avoid}.file{break-inside:auto;border:1px solid #cbd5e1}.toc{break-after:avoid}
   *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
@@ -2081,6 +2091,38 @@ def html_net(nd, meta):
     return "".join(h)
 
 
+GROUP_ORDER = ["program blocks", "plc tags", "plc data types", "watch and force tables", "technology objects",
+               "external source files"]
+
+
+def report_groups(reports):
+    """Changed files grouped like TIA's project tree: [(label, [(index, report)])]. The PLC goes in front of the
+    label when the files belong to more than one PLC."""
+    norm = [r.path.replace("\\", "/") for r in reports]
+    plcs = [plc_of(p) for p in norm]
+    multi = len(set(plcs)) > 1
+    groups = OrderedDict()
+    for i, (r, p, plc) in enumerate(zip(reports, norm, plcs)):
+        grp = export_place(p)[1]
+        label = "%s · %s" % (plc or "Other", grp) if multi else grp
+        groups.setdefault(label, [plc, grp, []])[2].append((i, r))
+    rank = lambda g: GROUP_ORDER.index(g.lower()) if g.lower() in GROUP_ORDER else (99 if g == "Other files" else 98)
+    order = sorted(groups.items(), key=lambda kv: (kv[1][0], rank(kv[1][1]), kv[1][1].lower()))
+    return [(k, v[2]) for k, v in order]
+
+
+GROUP_JS = """<script>
+function openTo(id){ const el = document.getElementById(id); if (!el) return;
+  for (let d = el.closest('details'); d; d = d.parentElement && d.parentElement.closest('details')) d.open = true;
+  el.scrollIntoView(); }
+document.querySelectorAll('.toc li a').forEach(a => a.addEventListener('click', e => { e.preventDefault();
+  const id = a.getAttribute('href').slice(1); openTo(id); history.replaceState(null, '', '#' + id); }));
+function allGroups(open){ document.querySelectorAll('details.grp').forEach(d => d.open = open); }
+if (location.hash) openTo(location.hash.slice(1));
+window.addEventListener('beforeprint', () => allGroups(true));
+</script>"""
+
+
 def build_block_html(meta, rep):
     """One block as it is in one version, every network drawn - for looking at it, not comparing."""
     doc = rep.new
@@ -2146,18 +2188,33 @@ def build_html(meta, reports, show_all):
         else:
             h.append('<div class="nothing">No exported files changed between these two versions.</div>')
     else:
-        h.append('<nav class="toc"><h2>%d file%s changed</h2><ul>' % (len(reports), "" if len(reports) == 1 else "s"))
-        for i, r in enumerate(reports):
-            doc = r.doc
-            nm = doc.name if doc else Path(r.path).name
-            nn = sum(1 for n in r.nets if n.status != "same")
-            extra = "%d network%s" % (nn, "" if nn == 1 else "s") if nn else ""
-            if r.bullets:
-                extra = ", ".join(x for x in [extra, "%d other change%s" % (len(r.bullets), "" if len(r.bullets) == 1 else "s")] if x)
-            h.append('<li><a href="#f%d">%s</a>%s<span class="count">%s</span></li>' % (
-                i, esc(nm), ' <span class="sbadge">SAFETY</span>' if r.safety else "", esc(extra)))
+        groups = report_groups(reports)
+        grouped = len(groups) > 1
+        h.append('<nav class="toc">%s<h2>%d file%s changed</h2><ul>' % (
+            '<span class="tools"><a onclick="allGroups(true)">Open all</a><a onclick="allGroups(false)">Close all</a></span>'
+            if grouped else "", len(reports), "" if len(reports) == 1 else "s"))
+        for label, items in groups:
+            if grouped:
+                h.append('<li class="tg">%s · %d</li>' % (esc(label), len(items)))
+            for i, r in items:
+                doc = r.doc
+                nm = doc.name if doc else Path(r.path).name
+                nn = sum(1 for n in r.nets if n.status != "same")
+                extra = "%d network%s" % (nn, "" if nn == 1 else "s") if nn else ""
+                if r.bullets:
+                    extra = ", ".join(x for x in [extra, "%d other change%s" % (len(r.bullets), "" if len(r.bullets) == 1 else "s")] if x)
+                h.append('<li><a href="#f%d">%s</a>%s<span class="count">%s</span></li>' % (
+                    i, esc(nm), ' <span class="sbadge">SAFETY</span>' if r.safety else "", esc(extra)))
         h.append("</ul></nav>")
-        for i, r in enumerate(reports):
+        starts = {items[0][0]: (label, items) for label, items in groups} if grouped else {}
+        ends = {items[-1][0] for _, items in groups} if grouped else set()
+        for i, r in [x for _, items in groups for x in items]:
+            if i in starts:                       # one collapsible section per TIA folder
+                label, items = starts[i]
+                ns = sum(1 for _, x in items if x.safety)
+                h.append('<details class="grp"%s><summary>%s<span class="count">%d file%s changed</span>%s</summary>' % (
+                    "" if len(reports) > 8 else " open", esc(label), len(items), "" if len(items) == 1 else "s",
+                    ' <span class="sbadge">%d SAFETY</span>' % ns if ns else ""))
             doc = r.doc
             nm = doc.name if doc else Path(r.path).name
             h.append('<article class="file%s" id="f%d"><div class="fh"><h2>%s</h2>%s<span class="kind">%s</span>'
@@ -2186,6 +2243,8 @@ def build_html(meta, reports, show_all):
                     h.append('<div class="same-list">Only formatting or metadata changed. Raw text diff:</div>')
                 h.append(html_codediff(r.textdiff[:600]))
             h.append("</div></article>")
+            if i in ends:
+                h.append("</details>")
     if meta.get("signoff"):
         h.append('<section class="signoff"><h2>%s</h2><p>Changes from <b>%s</b> %s to <b>%s</b> %s%s.</p>'
                  '<table><tr><th>Reviewed by</th><td></td><th>Date</th><td></td></tr>'
@@ -2194,8 +2253,8 @@ def build_html(meta, reports, show_all):
                      "Safety review sign-off" if meta.get("safety_only") else "Review sign-off",
                      esc(meta["old_short"]), esc(meta["old_desc"]), esc(meta["new_short"]), esc(meta["new_desc"]),
                      " · %d safety block%s" % (len(safe), "" if len(safe) == 1 else "s") if meta.get("safety_only") else ""))
-    h.append("</main><footer>PLC Diff %s · generated %s</footer></body></html>" % (
-        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
+    h.append("</main><footer>PLC Diff %s · generated %s</footer>%s</body></html>" % (
+        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), GROUP_JS if reports else ""))
     return "".join(h)
 
 
@@ -3416,6 +3475,8 @@ label.ck{display:flex;gap:8px;align-items:center;font-size:13px}
 .warnbox{background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;padding:10px 12px;font-size:13px;color:#7c2d12}
 .warnbox b{display:block;margin-bottom:4px}
 .files{font:12px Consolas,monospace;color:var(--muted);max-height:160px;overflow:auto;background:#f8fafc;border-radius:8px;padding:8px}
+.fgrp{margin:4px 0}.fgrp>summary{cursor:pointer;font-size:13px;font-weight:600;padding:4px 2px}.fgrp>summary span{color:var(--muted);font-weight:400;margin-left:8px}
+.fgrp .files{margin:2px 0 6px}
 .wrap{max-width:900px;margin:0 auto;padding:22px 20px 60px;overflow:auto;width:100%}
 .scroll{flex:1;overflow:auto}
 .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:16px}
@@ -3689,6 +3750,23 @@ async function openRepo(path){
 }
 function chooseAgain(){ goHome(); }
 // ---------- changes
+const TIA_DIRS = ['program blocks', 'plc tags', 'plc data types', 'watch and force tables', 'technology objects',
+  'external source files', 'traces', 'device configuration', 'software units', 'online backups', 'plc alarm text lists',
+  'plc supervisions', 'text lists', 'cross-device functions', 'security settings'];
+function filesByFolder(files){          // the changed files, one collapsible group per TIA folder
+  const groups = new Map();
+  for (const f of files){
+    const parts = f.split('/'), i = parts.findIndex((p, k) => k < parts.length - 1 && TIA_DIRS.includes(p.toLowerCase()));
+    const g = i < 0 ? 'Other files' : parts[i];
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(i < 0 ? f : parts.slice(i + 1).join('/'));
+  }
+  if (groups.size < 2) return '<div class="files">' + files.map(esc).join('<br>') + '</div>';
+  const rank = g => { const i = TIA_DIRS.slice(0, 6).indexOf(g.toLowerCase()); return g === 'Other files' ? 99 : i < 0 ? 98 : i; };
+  return [...groups.keys()].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b)).map(g =>
+    `<details class="fgrp"><summary>${esc(g)}<span>${groups.get(g).length}</span></summary>
+     <div class="files">${groups.get(g).map(esc).join('<br>')}</div></details>`).join('');
+}
 async function loadChanges(){
   await refresh();
   const r = S.repo;
@@ -3724,7 +3802,7 @@ async function loadChanges(){
   $('#ch-head').innerHTML = `<b>${n}</b> file${n > 1 ? 's' : ''} changed${who} since the last commit`;
   loadFrame('ch-frame', '/view/report?old=HEAD&new=WORK&t=' + T + '&view=' + $('#view').value + ($('#allnets').checked ? '&all=1' : '') + plcQ());
   const mine = r.dirty_files.filter(f => !S.plc || plcOf(f) === S.plc);
-  $('#ch-side').innerHTML = w.join('') + '<h3>Files</h3><div class="files">' + mine.map(esc).join('<br>') + '</div>' + commitBox('');
+  $('#ch-side').innerHTML = w.join('') + '<h3>Files</h3>' + filesByFolder(mine) + commitBox('');
   const sug = await api('/api/suggest');
   if ($('#cmsg') && !$('#cmsg').value) $('#cmsg').value = sug.message || '';
   SAFETY = sug.safety || [];
