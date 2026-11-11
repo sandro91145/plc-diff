@@ -1419,6 +1419,9 @@ def fbd_boxlike(title, top_label, rows, outs, mark, top_mark=None, gate=False, n
         rw = 18
     x0 = lw
     w = lw + bw + rw
+    lab = tmid(top_label, 44) if top_label else ""          # keep the end of the name visible
+    lab_x = max(2, x0 + bw / 2 - tw(lab) / 2)          # centred over the box, but never left of the drawing
+    w = max(w, lab_x + tw(lab) + 4)                     # ... and the drawing is wide enough for the whole label
     h = max(top + box_h, max([py + b.h for _, py, b in placed] + [0])) + 4
     s = []
     if mark and mark != "chg":
@@ -1431,12 +1434,11 @@ def fbd_boxlike(title, top_label, rows, outs, mark, top_mark=None, gate=False, n
     s.append('<rect class="w box" x="%.1f" y="%d" width="%.1f" height="%.1f" rx="2"/>' % (x0, top, bw, box_h))
     s.append(text(x0 + bw / 2, top + 14, trunc(title, 34), "tb", full=title))
     if top_label:
-        lab = trunc(top_label, 40)
         if top_mark:
             st, fill = HL[top_mark]
             s.append('<rect x="%.1f" y="1" width="%.1f" height="16" rx="3" fill="%s" stroke="%s"/>' % (
-                x0 + bw / 2 - tw(lab) / 2 - 4, tw(lab) + 8, fill, st))
-        s.append(text(x0 + bw / 2, 13, lab, "t" if gate else "tm", full=top_label))
+                lab_x - 4, tw(lab) + 8, fill, st))
+        s.append(text(lab_x, 13, lab, "t" if gate else "tm", "start", full=top_label))
     for r, y in zip(rows, ys):
         end = x0 - (7 if r["neg"] else 0)
         s.append('<path class="w" d="M%.1f %.1f H%.1f"/>' % (lw - WIRE, y, end))

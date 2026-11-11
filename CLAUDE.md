@@ -116,12 +116,15 @@ blocks,restoreblock,explore,quit,restart}`; GET `/view/block?rev=&path=` draws o
   `workspace_path` maps it into today's folder (tested for inferred and `was` moves).
 - S7-GRAPH chains with 3+ parallel branches: transition labels ran into the next column's steps → columns are
   400 px and a transition's text/highlight is capped to `COLW - STEP_W/2 - 12`.
+- FBD coil / instance names above a box were centred on the box and cut off when longer than the drawing (left
+  for a coil with nothing in front, right otherwise) → `fbd_boxlike` keeps the label inside and widens the drawing;
+  names are shortened in the middle (`tmid`) so the end stays visible. Checked on 4,384 real networks: none overflow.
 - Iframe height in CSS grid (150 px default) → `grid-template-rows:minmax(0,1fr)` + `height:100%`.
 
 
 ## 8. How we test
 
-- **`python tests/smoke.py` runs the whole checklist below in one go** (51 checks, ~20 s): both files compile,
+- **`python tests/smoke.py` runs the whole checklist below in one go** (55 checks, ~20 s): both files compile,
   a throwaway Git repo is built from the samples, the compare finds every kind of change (tag, interface, contact,
   box pin, call parameter, negated input, added/removed network), the HTML page really contains drawings and print
   CSS, `--files` / `--work` / `--history` work, the CSV has the BOM and `;` Excel needs, and the app itself starts,
