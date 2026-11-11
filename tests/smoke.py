@@ -150,6 +150,11 @@ def check_html(repo, tmp):
     say('<div class="gview">' in h and all('<div class="gchg" data-g="%s" hidden>' % k in h for k in ("S2", "S3", "T2"))
         and 'rect data-g="S2"' in h, "a changed S7-GRAPH shows the whole sequence, each change opens before | after")
     say("transition T2: condition changed" in h, "a transition whose condition is one tag wired straight in is compared")
+    import importlib.machinery as _ilm, importlib.util as _ilu
+    _ld = _ilm.SourceFileLoader("pdm", str(APP)); _sp = _ilu.spec_from_loader("pdm", _ld); _pd = _ilu.module_from_spec(_sp); _ld.exec_module(_pd)
+    _long = '"FGDB_010XYZ003-QM1@AddOn".AddS.Belegt_Type_C_with_a_long_tail'
+    say(_long.replace('"', "&quot;") in _pd.fbd_label(_long).svg or _long in _pd.fbd_label(_long).svg,
+        "long tag names are drawn whole, not shortened in the middle")
 
 
 def check_files_mode(repo, tmp):

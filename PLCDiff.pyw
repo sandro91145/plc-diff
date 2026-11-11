@@ -1164,6 +1164,9 @@ def trunc(s, n=30):
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+NAME_MAX = 120     # tag names in LAD / FBD drawings are shown whole: the middle (e.g. a device number) matters
+
+
 def tmid(s, n=34):
     s = str(s)
     if len(s) <= n:
@@ -1194,7 +1197,7 @@ def text(x, y, s, cls="t", anchor="middle", full=None):
 
 
 def blk_contact(label, mark, sym="", neg=False, below=""):
-    lab, bl = tmid(label, 32), tmid(below, 32)
+    lab, bl = tmid(label, NAME_MAX), tmid(below, NAME_MAX)
     w = max(64, tw(lab) + 16, tw(bl) + 16 if bl else 0)
     L, h = 30, 50 + (14 if bl else 0)
     cx = w / 2
@@ -1212,7 +1215,7 @@ def blk_contact(label, mark, sym="", neg=False, below=""):
 
 
 def blk_coil(label, mark, sym="", neg=False):
-    lab = tmid(label, 32)
+    lab = tmid(label, NAME_MAX)
     w = max(64, tw(lab) + 16)
     L, h = 30, 50
     cx = w / 2
@@ -1230,7 +1233,7 @@ def blk_coil(label, mark, sym="", neg=False):
 
 
 def blk_cmp(p, mark):
-    a, b = trunc(p.in1, 30), trunc(p.in2, 30)
+    a, b = tmid(p.in1, NAME_MAX), tmid(p.in2, NAME_MAX)
     op = CMP_OPS.get(p.name, p.name)
     w = max(72, tw(a) + 16, tw(b) + 16)
     L, h = 36, 76
@@ -1257,12 +1260,12 @@ def blk_not(mark):
 
 
 def blk_box(p, mark, changed_pins=None):
-    title, inst = trunc(p.title, 34), trunc(p.instance, 40)
+    title, inst = tmid(p.title, NAME_MAX), tmid(p.instance, NAME_MAX)
     ins = list(p.ins) or [("", "", True)]
     outs = list(p.outs)
     rows = max(len(ins), len(outs), 1)
-    lw = max([tw(trunc(v, 34)) for _, v, m in ins if not m] + [0]) + 20
-    rw = max([tw(trunc(v, 34)) for _, v, pw in outs if not pw] + [0]) + 20
+    lw = max([tw(tmid(v, NAME_MAX)) for _, v, m in ins if not m] + [0]) + 20
+    rw = max([tw(tmid(v, NAME_MAX)) for _, v, pw in outs if not pw] + [0]) + 20
     lw, rw = max(lw, 28), max(rw, 28)
     pin_l = max([len(x) for x, _, _ in ins] + [0]) * CW
     pin_r = max([len(x) for x, _, _ in outs] + [0]) * CW
@@ -1281,7 +1284,7 @@ def blk_box(p, mark, changed_pins=None):
         s = [hl(w, h, mark)]
 
     def pin_hl(x, y, val, anchor):
-        vw = tw(trunc(val, 34)) + 8
+        vw = tw(tmid(val, NAME_MAX)) + 8
         x0 = x - vw + 4 if anchor == "end" else x - 4
         return '<rect x="%.1f" y="%.1f" width="%.1f" height="16" rx="3" fill="%s" stroke="%s"/>' % (
             x0, y - 8, vw, HL["chg"][1], HL["chg"][0])
@@ -1297,7 +1300,7 @@ def blk_box(p, mark, changed_pins=None):
             s.append('<path class="w" d="M%.1f %.1f H%.1f"/>' % (bx - 8, y, bx))
             if pin in changed_pins:
                 s.append(pin_hl(bx - 11, y, val, "end"))
-            s.append(text(bx - 11, y + 4, trunc(val, 34), "t", "end", full=val))
+            s.append(text(bx - 11, y + 4, tmid(val, NAME_MAX), "t", "end", full=val))
         if pin:
             s.append(text(bx + 5, y + 4, pin, "tp", "start"))
     for i, (pin, val, pw) in enumerate(outs):
@@ -1308,7 +1311,7 @@ def blk_box(p, mark, changed_pins=None):
             s.append('<path class="w" d="M%.1f %.1f H%.1f"/>' % (bx + bw, y, bx + bw + 8))
             if pin in changed_pins:
                 s.append(pin_hl(bx + bw + 11, y, val, "start"))
-            s.append(text(bx + bw + 11, y + 4, trunc(val, 34), "t", "start", full=val))
+            s.append(text(bx + bw + 11, y + 4, tmid(val, NAME_MAX), "t", "start", full=val))
         s.append(text(bx + bw - 5, y + 4, pin, "tp", "end"))
     return B(w, h, L, "".join(s))
 
@@ -1435,7 +1438,7 @@ def net_svg(net, marks, pins=None):
 # ---- FBD drawing -----------------------------------------------------------
 
 def fbd_label(txt, mark=None, neg=False):
-    lab = tmid(txt, 34)
+    lab = tmid(txt, NAME_MAX)
     w = tw(lab) + 22
     s = []
     if mark:
@@ -1452,7 +1455,7 @@ def fbd_boxlike(title, top_label, rows, outs, mark, top_mark=None, gate=False, n
     ROW, HEAD, WIRE = 20, (20 if not gate else 18), 14
     pin_l = max([len(r["pin"]) for r in rows] + [0]) * CW
     pin_r = max([len(o[0]) for o in outs] + [0]) * CW
-    bw = max(46 if gate else 84, tw(trunc(title, 34)) + 20, pin_l + pin_r + 26)
+    bw = max(46 if gate else 84, tw(tmid(title, NAME_MAX)) + 20, pin_l + pin_r + 26)
     lw = max([r["block"].w for r in rows] + [0]) + WIRE
     top = 20 if top_label else 4
     # vertical placement of input rows
@@ -1468,12 +1471,12 @@ def fbd_boxlike(title, top_label, rows, outs, mark, top_mark=None, gate=False, n
               for i in range(n_out)]
     last = max(ys + out_ys + [top + HEAD + ROW / 2])
     box_h = last + ROW / 2 + 2 - top
-    rw = max([tw(trunc(o[1], 34)) for o in outs if not o[2]] + [0]) + 20 if outs else 0
+    rw = max([tw(tmid(o[1], NAME_MAX)) for o in outs if not o[2]] + [0]) + 20 if outs else 0
     if outs and all(o[2] for o in outs):
         rw = 18
     x0 = lw
     w = lw + bw + rw
-    lab = tmid(top_label, 44) if top_label else ""          # keep the end of the name visible
+    lab = tmid(top_label, NAME_MAX) if top_label else ""    # whole name (only absurdly long ones are shortened)
     lab_x = max(2, x0 + bw / 2 - tw(lab) / 2)          # centred over the box, but never left of the drawing
     w = max(w, lab_x + tw(lab) + 4)                     # ... and the drawing is wide enough for the whole label
     h = max(top + box_h, max([py + b.h for _, py, b in placed] + [0])) + 4
@@ -1486,7 +1489,7 @@ def fbd_boxlike(title, top_label, rows, outs, mark, top_mark=None, gate=False, n
     for px, py, b in placed:
         s.append(g(px, py, b.svg))
     s.append('<rect class="w box" x="%.1f" y="%d" width="%.1f" height="%.1f" rx="2"/>' % (x0, top, bw, box_h))
-    s.append(text(x0 + bw / 2, top + 14, trunc(title, 34), "tb", full=title))
+    s.append(text(x0 + bw / 2, top + 14, tmid(title, NAME_MAX), "tb", full=title))
     if top_label:
         if top_mark:
             st, fill = HL[top_mark]
@@ -1509,10 +1512,10 @@ def fbd_boxlike(title, top_label, rows, outs, mark, top_mark=None, gate=False, n
         else:
             s.append('<path class="w" d="M%.1f %.1f H%.1f"/>' % (start, y, x0 + bw + 8))
             if hlp:
-                lab = trunc(val, 34)
+                lab = tmid(val, NAME_MAX)
                 s.append('<rect x="%.1f" y="%.1f" width="%.1f" height="16" rx="3" fill="%s" stroke="%s"/>' % (
                     x0 + bw + 7, y - 8, tw(lab) + 8, HL["chg"][1], HL["chg"][0]))
-            s.append(text(x0 + bw + 11, y + 4, trunc(val, 34), "t", "start", full=val))
+            s.append(text(x0 + bw + 11, y + 4, tmid(val, NAME_MAX), "t", "start", full=val))
         if pin:
             s.append(text(x0 + bw - 5, y + 4, pin, "tp", "end"))
     return B(w, h, ys[0] if ys else top + HEAD + ROW / 2, "".join(s))
