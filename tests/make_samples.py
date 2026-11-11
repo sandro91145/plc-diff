@@ -255,6 +255,21 @@ def fbd_fc(new):
                                                                  "<ProgrammingLanguage>FBD</ProgrammingLanguage></AttributeList><ObjectList>")
 
 
+def db(new):
+    """A global DB: a start value, a data type and the order of members change, one member is added."""
+    rows = [("Speed", "Int", "1200"), ("Ramp", "Time", "T#2S"), ("Mode", "Byte", ""), ("Count", "DInt", "")]
+    if new:
+        rows = [("Speed", "Int", "1500"), ("Mode", "Byte", ""), ("Ramp", "Time", "T#2S"), ("Count", "LInt", ""),
+                ("Limit", "Real", "99.5")]
+    m = "".join('<Member Name="%s" Datatype="%s">%s</Member>' % (n, d, "<StartValue>%s</StartValue>" % v if v else "")
+                for n, d, v in rows)
+    return ('<?xml version="1.0" encoding="utf-8"?>\n<Document><Engineering version="V20" /><SW.Blocks.GlobalDB ID="0">'
+            '<AttributeList><Interface><Sections xmlns="%s"><Section Name="Static">%s</Section></Sections></Interface>'
+            '<MemoryLayout>Standard</MemoryLayout><Name>DB_Settings</Name><Number>20</Number>'
+            '<ProgrammingLanguage>DB</ProgrammingLanguage></AttributeList><ObjectList>%s</ObjectList>'
+            '</SW.Blocks.GlobalDB></Document>' % (IFC, m, ml("Title", "Station settings", "F1")))
+
+
 def tags(new):
     rows = [("I_Start", "Bool", "%I0.0"), ("I_Stop", "Bool", "%I0.1"), ("I_Reset", "Bool", "%I0.2"),
             ("Q_Motor", "Bool", "%Q0.0"), ("Q_TestLamp", "Bool", "%Q0.1")]
@@ -276,3 +291,4 @@ if __name__ == "__main__":
     (out / "vci" / "Program blocks" / "Station" / "FC_Station.xml").write_text(block(new), encoding="utf-8")
     (out / "vci" / "Program blocks" / "Station" / "FC_Alarms.xml").write_text(fbd_fc(new), encoding="utf-8")
     (out / "vci" / "PLC tags" / "Station1_IO.xml").write_text(tags(new), encoding="utf-8")
+    (out / "vci" / "Program blocks" / "Station" / "DB_Settings.xml").write_text(db(new), encoding="utf-8")
