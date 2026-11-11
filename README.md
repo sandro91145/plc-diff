@@ -23,6 +23,8 @@ It runs on your own PC, opens in your browser, and needs nothing but Python and 
   Changed files are grouped like TIA's project tree (Program blocks, PLC tags, PLC data types, …), each group opens
   and closes, and a sidebar lists them so you can jump to any file. Big drawings (wide networks, long S7-GRAPH
   chains) start zoomed out with the changes highlighted; click a change to zoom in there.
+  A block with many changed networks gets a toolbar: go to a network, show only one kind of change, find a
+  tag, fold networks away (click a network's title line to fold just that one).
   A block TIA only renumbered after a compile says "no logic change".
 - **Compare two folders** — no Git needed: e.g. the customer's export against yours, or a backup from site.
 - **Change history** — every change with date, time and author, searchable, with charts, and a download for Excel.

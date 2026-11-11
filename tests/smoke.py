@@ -139,6 +139,12 @@ def check_html(repo, tmp):
     say(side.count('data-f="f') == h.count('<article class="file') >= 3 and "<details open>" in side,
         "the sidebar lists every changed file, grouped by TIA folder")
     say("Whole drawing" in h and "zfit" in h, "big drawings get the zoom-out / zoom-in tools")
+    import re as _re
+    secs = _re.findall(r'<section id="f\d+n\d+" data-k="([^"]*)" class="net (\w+)', h)
+    say(secs and all(k for k, _ in secs) and h.count('<section class="net ') == 0 and "No network matches" in h,
+        "every changed network can be folded and filtered (%d networks)" % len(secs))
+    say('<div class="ntools"' in h and 'data-k="new"' in h and 'placeholder="Find a tag in this block' in h,
+        "a block with 3+ changed networks gets the go-to / show-only / find toolbar")
 
 
 def check_files_mode(repo, tmp):

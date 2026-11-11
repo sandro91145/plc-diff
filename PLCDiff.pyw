@@ -2037,6 +2037,22 @@ table.bh a{color:var(--accent);text-decoration:none;white-space:nowrap}table.bh 
 .ztools[data-m="fit"] .zb[data-a="fit"],.ztools[data-m="full"] .zb[data-a="full"]{background:var(--ink);color:#fff;border-color:var(--ink)}
 .ladwrap.zfit svg{cursor:zoom-in}.ladwrap.zfull{max-height:78vh;overflow:auto}
 rect.zpulse{animation:zp .5s ease-in-out 3}@keyframes zp{50%{stroke-width:6}}
+.nh .ncnt{margin-left:auto;display:flex;gap:4px}.nh .ncnt i{font:600 11px Consolas,monospace;padding:2px 6px;border-radius:5px}
+.ncnt i.add{background:var(--addbg);color:var(--add)}.ncnt i.del{background:var(--delbg);color:var(--del)}.ncnt i.chg{background:var(--chgbg);color:var(--chg)}
+section.net[data-k] .nh{cursor:pointer}section.net[data-k]{scroll-margin-top:96px}.nh .nfold{color:var(--muted);font-size:13px;width:14px;text-align:center}
+.nh .nfold{display:none}section.net[data-k] .nh .nfold{display:inline}
+section.net.fold > :not(.nh){display:none}section.net.fold .nfold{transform:rotate(-90deg)}section.net.nhide{display:none}
+.ntools{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:10px 0 4px;font-size:12px;color:var(--muted);
+position:sticky;top:0;z-index:2;display:flex;flex-direction:column;gap:6px}
+.ntools>div{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.ntools b{color:var(--ink)}
+.ntools .njump a{display:inline-block;min-width:22px;text-align:center;padding:2px 5px;border-radius:5px;cursor:pointer;font:600 11px Consolas,monospace;
+border:1px solid var(--line);background:#fff;color:var(--ink);margin:1px}
+.ntools .njump a.changed{border-color:#fcd34d;background:var(--chgbg)}.ntools .njump a.added{border-color:#86efac;background:var(--addbg)}
+.ntools .njump a.removed{border-color:#fca5a5;background:var(--delbg)}.ntools .njump a.off{opacity:.3}
+.ntools button{font:600 12px "Segoe UI",sans-serif;border:1px solid var(--line);background:#fff;border-radius:999px;padding:3px 10px;cursor:pointer;color:var(--ink)}
+.ntools button span{color:var(--muted);font-weight:400}.ntools button.on{background:var(--ink);color:#fff;border-color:var(--ink)}.ntools button.on span{color:#cbd5e1}
+.ntools input{font:12px "Segoe UI",sans-serif;border:1px solid var(--line);border-radius:6px;padding:4px 8px;width:200px;margin-left:6px}
+.ntools a[data-a]{color:var(--accent);cursor:pointer;font-weight:600;margin-left:8px}.ntools .nmsg{margin-left:8px;color:var(--ink)}
 .nochange{background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;border-radius:8px;padding:10px 14px;margin:4px 0 10px;font-size:13px}
 .toc .tg{list-style:none;margin:8px 0 2px -18px;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
 .toc .tools{float:right;font-size:12px}.toc .tools a{color:var(--accent);margin-left:12px;cursor:pointer}
@@ -2047,7 +2063,7 @@ details.grp>summary:before{content:"▸";color:var(--muted);width:12px}details.g
 details.grp>summary .count{color:var(--muted);font-weight:400;font-size:13px}
 details.grp[open]>summary{margin-bottom:12px}
 .count{color:var(--muted);font-size:12px;margin-left:6px}
-.file{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:26px;overflow:hidden}
+.file{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:26px;overflow:hidden;overflow:clip}
 .file>.fh{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;align-items:baseline;gap:10px}
 .fh h2{margin:0;font-size:17px}
 .fh .path{color:var(--muted);font:12px Consolas,monospace;word-break:break-all}
@@ -2106,7 +2122,7 @@ display:flex;flex-direction:column;gap:2px}.safetybar small{color:#991b1b}
   body{background:#fff}header{background:#fff;color:#0f172a;border-bottom:2px solid #0f172a;padding:10px 0}
   header h1{color:#0f172a}.rev{background:#fff;border-color:#cbd5e1;color:#0f172a}.rev code{color:#0f172a}
   .commits{color:#334155}.commits code{color:#0f172a}.brand{color:#0e7490}
-  .printbtn,.legend span:last-child,details summary,.toc .tools,.sidenav,.ztools{display:none}
+  .printbtn,.legend span:last-child,details summary,.toc .tools,.sidenav,.ztools,.ntools,.nh .nfold{display:none}
   .layout{display:block}.layout .toc{display:block}.ladwrap.zfull{max-height:none}
   details.grp>summary{display:flex;border:0;border-bottom:2px solid #0f172a;border-radius:0;padding:6px 0}details.grp>summary:before{content:""}
   main{padding:10px 0;max-width:none}.ladwrap{overflow:visible;border:0;padding:0}svg.lad{max-width:100%;height:auto}
@@ -2200,6 +2216,87 @@ def report_groups(reports):
     rank = lambda g: GROUP_ORDER.index(g.lower()) if g.lower() in GROUP_ORDER else (99 if g == "Other files" else 98)
     order = sorted(groups.items(), key=lambda kv: (kv[1][0], rank(kv[1][1]), kv[1][1].lower()))
     return [(k, v[2]) for k, v in order]
+
+
+def net_kinds(nd):
+    """What a changed network is about, for the filter buttons: new / gone, or parts added / removed / changed."""
+    if nd.status == "added":
+        return ["new"]
+    if nd.status == "removed":
+        return ["gone"]
+    ks = {c for c, t in nd.bullets if not t.startswith("network")}
+    return [k for k in ("add", "del", "chg") if k in ks] or ["chg"]
+
+
+def net_with_tools(nd, meta, nid):
+    """A changed network with an id, its kinds for the filter, and +/−/~ counts in its title line (click it to fold)."""
+    s = html_net(nd, meta)
+    n = {c: sum(1 for k, t in nd.bullets if k == c and not t.startswith("network")) for c in ("add", "del", "chg")}
+    cnt = "" if nd.status in ("added", "removed") else "".join(
+        '<i class="%s" title="%s">%s%d</i>' % (c, tip, sg, n[c]) for c, sg, tip in (
+            ("add", "+", "parts added"), ("del", "−", "parts removed"), ("chg", "~", "parts changed")) if n[c])
+    s = s.replace('<section class="net ', '<section id="%s" data-k="%s" class="net ' % (nid, " ".join(net_kinds(nd))), 1)
+    return s.replace("</div>", '<span class="ncnt">%s</span><span class="nfold" title="Fold / unfold">▾</span></div>' % cnt, 1)
+
+
+NET_KINDS = (("new", "New networks"), ("gone", "Removed networks"), ("add", "Parts added"),
+             ("del", "Parts removed"), ("chg", "Parts changed"))
+
+
+def net_toolbar(r, i, secs):
+    """Above the networks of a block with 3 or more changed networks: jump to one, show only one kind, find a tag, fold."""
+    if len(secs) < 3:
+        return ""
+    ks = [re.search(r'data-k="([^"]*)"', x).group(1).split() for x in secs]
+    def jump_link(j, x):
+        st = re.search(r'class="net (\w+)', x).group(1)
+        head = re.search(r"<b>([^<]*)</b>", x).group(1)
+        nt = re.search(r'<span class="nt">([^<]*)</span>', x)
+        return '<a data-n="f%dn%d" class="%s" title="%s%s">%s</a>' % (
+            i, j, st, head, " · " + nt.group(1) if nt else "", re.sub(r"\D", "", head) or "G")
+    jump = "".join(jump_link(j, x) for j, x in enumerate(secs))
+    flt = "".join('<button data-k="%s">%s <span>%d</span></button>' % (k, lab, sum(1 for x in ks if k in x))
+                  for k, lab in NET_KINDS if any(k in x for x in ks))
+    return ('<div class="ntools" data-f="f%d"><div><b>%d changed networks</b> · Go to: <span class="njump">%s</span></div>'
+            '<div><span>Show only:</span>%s<input type="search" placeholder="Find a tag in this block…">'
+            '<a data-a="fold">Fold all</a><a data-a="open">Unfold all</a><span class="nmsg"></span></div></div>' % (
+                i, len(secs), jump, flt))
+
+
+NETS_JS = """<script>
+// Networks: click a title line to fold / unfold it. Blocks with many changed networks get a toolbar:
+// go to a network, show only one kind of change, find a tag, fold or unfold all.
+(function(){
+  const norm = s => s.toLowerCase().replace(/["#]/g, '');
+  const nets = t => [...document.querySelectorAll('section.net[id^="' + t.dataset.f + 'n"]')];
+  function apply(t){
+    const on = [...t.querySelectorAll('button[data-k].on')].map(b => b.dataset.k), q = norm(t.querySelector('input').value.trim());
+    let n = 0; const all = nets(t);
+    all.forEach(s => { const ok = (!on.length || s.dataset.k.split(' ').some(k => on.includes(k))) &&
+                                  (!q || norm(s.textContent).includes(q));
+      s.classList.toggle('nhide', !ok); if (ok) n++;
+      const a = t.querySelector('a[data-n="' + s.id + '"]'); if (a) a.classList.toggle('off', !ok); });
+    t.querySelector('.nmsg').textContent = !(on.length || q) ? '' : n ? 'Showing ' + n + ' of ' + all.length + '.' :
+      'No network matches.';
+  }
+  document.addEventListener('click', e => {
+    const h = e.target.closest('section.net > .nh');
+    if (h && !e.target.closest('a,button')){ h.parentElement.classList.toggle('fold'); return; }
+    const t = e.target.closest('.ntools'); if (!t) return;
+    const b = e.target.closest('button[data-k]');
+    if (b){ b.classList.toggle('on'); apply(t); return; }
+    const a = e.target.closest('a'); if (!a) return;
+    if (a.dataset.a) nets(t).forEach(s => s.classList.toggle('fold', a.dataset.a === 'fold'));
+    if (a.dataset.n){ const s = document.getElementById(a.dataset.n);
+      if (s.classList.contains('nhide')){ t.querySelectorAll('button.on').forEach(x => x.classList.remove('on'));
+        t.querySelector('input').value = ''; apply(t); }
+      s.classList.remove('fold'); s.scrollIntoView({block: 'start'}); }
+  });
+  document.addEventListener('input', e => { const t = e.target.closest('.ntools'); if (t) apply(t); });
+  window.addEventListener('beforeprint', () => document.querySelectorAll('section.net.fold, section.net.nhide')
+    .forEach(s => s.classList.remove('fold', 'nhide')));
+})();
+</script>"""
 
 
 GROUP_JS = """<script>
@@ -2512,16 +2609,17 @@ def build_html(meta, reports, show_all):
             tbl = html_member_table(r.old.iface if r.old else None, r.new.iface if r.new else None) \
                 if doc and doc.kind in ("data", "udt") and r.bullets and r.status not in ("A", "D") else ""
             h.append(tbl or html_bullets(r.bullets))
-            same = []
+            same, shown = [], []
             for nd in r.nets:
                 if nd.status == "same" and not show_all:
                     same.append(nd.new.idx)
                     continue
                 if nd.status == "same":
-                    h.append("<details><summary>Network %d%s (unchanged)</summary>%s</details>" % (
+                    shown.append("<details><summary>Network %d%s (unchanged)</summary>%s</details>" % (
                         nd.new.idx, " · " + esc(nd.new.title) if nd.new.title else "", html_net(nd, meta)))
                 else:
-                    h.append(html_net(nd, meta))
+                    shown.append(net_with_tools(nd, meta, "f%dn%d" % (i, len(shown))))
+            h.append(net_toolbar(r, i, [x for x in shown if x.startswith("<section")]) + "".join(shown))
             if same and any(n.status != "same" for n in r.nets):
                 h.append('<div class="same-list">%d unchanged network%s hidden (run with --all to show them).</div>' % (
                     len(same), "" if len(same) == 1 else "s"))
@@ -2554,7 +2652,7 @@ def build_html(meta, reports, show_all):
   'Content-Type': 'application/json'}, body: JSON.stringify({commit: c, note})}); const j = await r.json().catch(() => ({}));
   if (j.error) return alert(j.error); location.reload(); }</script>""" % json.dumps(meta["token"])) if meta.get("token") else ""
     h.append("</main><footer>PLC Diff %s · generated %s</footer>%s%s%s</body></html>" % (
-        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), GROUP_JS if reports else "", ZOOM_JS, review_js))
+        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), GROUP_JS if reports else "", ZOOM_JS + NETS_JS, review_js))
     page = "".join(h)
     side = meta.pop("_side", "")
     if side:
