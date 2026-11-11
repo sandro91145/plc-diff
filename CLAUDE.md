@@ -167,7 +167,6 @@ compare to some files (a block's history).
 ## 9. Known limits / ideas not done yet
 
 - Not read/drawn: hardware configuration, HMI, technology objects as diagrams (shown as text/“not understood”).
-- Data blocks: start-value changes are listed but not as a nice table.
 - Possible next: hardware configuration and HMI; a network install for teams without GitHub access.
 - Done in 1.4.0: Blocks tab (view, per-block history), where is this tag used, update from GitHub, DB/UDT table,
   compare two folders, review sign-off, member/network order changes.

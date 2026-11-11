@@ -2,52 +2,68 @@
 
 **See what changed in your Siemens TIA Portal PLC program — drawn as ladder, FBD and S7-GRAPH, not as XML.**
 
-PLC Diff compares two versions of a TIA Portal V20 program and shows every changed network as a picture, with
-added parts in green, removed in red and changed in yellow. Versions come from Git: TIA Portal's
-*Version Control Interface* exports your blocks as files into a Git repository, and PLC Diff reads them.
+PLC Diff compares two versions of a TIA Portal V20 program and shows every changed network as a picture, before
+and after side by side, with added parts in green, removed in red and changed in yellow. Versions come from Git:
+TIA Portal's *Version Control Interface* exports your blocks as files into a Git repository, and PLC Diff reads them.
 
 It runs on your own PC, opens in your browser, and needs nothing but Python and Git. Your code never leaves your PC
 (GitHub is optional — a shared network folder works too).
 
-![Compare two versions](docs/images/compare.png)
+![Compare page: changed files on the left, grouped like TIA's project tree](docs/images/compare.png)
 
-| Ladder (LAD) | Function block diagram (FBD) |
+| Ladder (LAD), before and after | Function block diagram (FBD), before and after |
 | --- | --- |
 | ![LAD network](docs/images/ladder.png) | ![FBD network](docs/images/fbd.png) |
 
+| S7-GRAPH: the whole sequence first… | …click a change to see it before and after |
+| --- | --- |
+| ![S7-GRAPH whole sequence](docs/images/graph.png) | ![One S7-GRAPH change opened](docs/images/graph-change.png) |
+
 ## What it does
 
-- **Compare versions** — any two commits, or your unsaved export against the last commit. LAD drawn as ladder,
-  FBD as FBD, S7-GRAPH as a step chain (steps, transitions, branches, jumps, supervisions, interlocks),
-  SCL/STL as a text diff. Data blocks and UDTs as a before/after table (data type, start value, moved members).
-  Changed files are grouped like TIA's project tree (Program blocks, PLC tags, PLC data types, …), each group opens
-  and closes, and a sidebar lists them so you can jump to any file. Big drawings (wide networks, long S7-GRAPH
-  chains) start zoomed out with the changes highlighted; click a change to zoom in there.
-  Changed LAD/FBD networks are drawn before | after side by side; a changed S7-GRAPH sequence shows the whole
-  sequence first - click a change to see that step or transition before | after.
-  A block with many changed networks gets a toolbar: go to a network, show only one kind of change, find a
-  tag, fold networks away (click a network's title line to fold just that one).
-  A block TIA only renumbered after a compile says "no logic change".
+### Compare versions
+
+- **Any two versions** — two commits, or your fresh export against the last commit.
+- **Drawn like in TIA** — LAD as ladder, FBD as FBD, SCL/STL as a text diff. Before and after are side by side;
+  tag names are always shown in full.
+- **S7-GRAPH sequences** — steps, transitions, branches, jumps, supervisions and interlocks. You first see the whole
+  sequence with the changes marked; click a step or transition to see that change before and after, with its
+  condition drawn as FBD and where it sits in the chain.
+- **Data blocks and data types** — a before/after table: data type, start value, added, removed and moved members.
+- **Easy to find your way** — changed files are grouped like TIA's project tree (Program blocks, PLC tags, PLC data
+  types…) and listed in a sidebar. Big drawings start zoomed out with the changes highlighted; click a change to
+  zoom in there. A block with many changed networks gets a toolbar: go to a network, show only one kind of change,
+  find a tag, fold networks away.
+- **No false alarms** — a block TIA only renumbered after a compile says "no logic change".
 - **Compare two folders** — no Git needed: e.g. the customer's export against yours, or a backup from site.
-- **Change history** — every change with date, time and author, searchable, with charts, and a download for Excel.
-- **Commit and share** — one button to save ("commit") and send ("push") your changes, with a suggested message
-  that lists what changed. Pull, conflicts (keep mine / use theirs) are handled for you.
-- **Several PLCs, several people** — one folder per PLC in one project; each person commits only their own PLC.
-- **Several projects** — a home screen with all your projects and their status.
-- **Safety** — F-blocks (F_LAD / F_FBD / F_DB) are marked, need an extra confirmation before committing, and can be
-  reported on their own with a sign-off sheet.
-- **Blocks tab** — every block of any version, grouped like TIA's project tree. Click one to see it drawn (LAD, FBD,
-  S7-GRAPH chain), even if it never changed; **History** lists every commit that changed it, with what changed.
+
+### Look up and look back
+
+- **Blocks tab** — every block of any version, grouped like TIA's project tree. Click one to see it drawn, even if it
+  never changed; **History** lists every commit that changed it, with what changed.
 - **Where is this tag used?** — type a tag in the Blocks tab: every network, data block and tag table that uses it,
   drawn, with the tag highlighted.
-- **Review sign-off** — mark a commit as reviewed (with a remark); it is shared with the team through Git and shows
-  in the history, the compare page and the printed sign-off sheet.
+- **Change history** — every change with date, time and author, searchable, with charts, and a download for Excel.
 - **Get an old version back** — put any earlier version of a single block into the TIA workspace folder, ready for
-  *Import from workspace* in TIA. Setup → **Get an old version of a block back**.
-- **Releases and reports** — mark a version as a release (e.g. FAT, SAT), attach the archive, print any comparison
-  or save it as PDF.
-- **Updates** — PLC Diff tells you when a new version is on GitHub and updates itself with one click (Setup → Updates
-  to turn this off).
+  *Import from workspace* in TIA (Setup → **Get an old version of a block back**).
+
+### Work as a team
+
+- **Commit and share** — one button to save ("commit") and send ("push") your changes, with a suggested message
+  that lists what changed. Pull and conflicts (keep mine / use theirs) are handled for you.
+- **Several PLCs, several people** — one folder per PLC in one project; each person commits only their own PLC.
+- **Several projects** — a home screen with all your projects and their status.
+- **Review sign-off** — mark a commit as reviewed, with a remark. It is shared with the team through Git and shows in
+  the history, on the compare page and on the printed sign-off sheet.
+
+### Safety, releases and reports
+
+- **Safety** — F-blocks (F_LAD / F_FBD / F_DB) are marked, need an extra confirmation before committing, and can be
+  reported on their own with a sign-off sheet.
+- **Releases** — mark a version as a release (e.g. FAT, SAT) and attach the archive.
+- **Reports** — print any comparison or save it as PDF.
+- **Updates** — PLC Diff tells you when a new version is on GitHub and updates itself with one click
+  (Setup → Updates to turn this off).
 
 ![Change history](docs/images/history.png)
 
@@ -55,10 +71,14 @@ It runs on your own PC, opens in your browser, and needs nothing but Python and 
 
 1. Install **Git for Windows** — https://git-scm.com (default options are fine).
 2. Install **Python 3.8 or newer** — https://python.org (tick *Add python.exe to PATH*).
-3. Download `PLCDiff.pyw` and `Start PLC Diff.bat` into one folder, e.g. `D:\Tools\PLCDiff`.
+3. Download the zip from the [latest release](https://github.com/sandro91145/plc-diff/releases/latest) and unzip
+   it into a folder, e.g. `D:\Tools\PLCDiff` (or download `PLCDiff.pyw` and `Start PLC Diff.bat` into one folder).
 4. Double-click **Start PLC Diff.bat**. The app opens in your browser.
 
 No extra Python packages are needed. If the app can't find Git, paste the path to `git.exe` in **Setup**.
+
+**Updating:** from version 1.4.0 on, PLC Diff offers new versions itself (**Update now**; your old file is kept as
+`PLCDiff.pyw.bak`). Older versions: replace `PLCDiff.pyw` with the new one.
 
 ## Connect TIA Portal
 
@@ -87,7 +107,9 @@ python PLCDiff.pyw --help
 ## For developers
 
 Everything is in one file, `PLCDiff.pyw` (Python standard library only). `tests/make_samples.py` creates
-realistic test exports. `CLAUDE.md` explains the structure, the TIA export formats and the design decisions.
+realistic test exports (LAD, FBD, S7-GRAPH, a data block, a tag table) and `python tests/smoke.py` checks the whole
+app with them in about 30 seconds. `CLAUDE.md` explains the structure, the TIA export formats and the design
+decisions.
 
 ## License
 
