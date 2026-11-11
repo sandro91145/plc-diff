@@ -27,6 +27,8 @@ It runs on your own PC, opens in your browser, and needs nothing but Python and 
 - **Several projects** — a home screen with all your projects and their status.
 - **Safety** — F-blocks (F_LAD / F_FBD / F_DB) are marked, need an extra confirmation before committing, and can be
   reported on their own with a sign-off sheet.
+- **View any block** — draw a whole block (LAD, FBD, S7-GRAPH chain) as it was in any version, even if it never
+  changed. Setup → **Get an old version of a block back** → **View**.
 - **Get an old version back** — put any earlier version of a single block into the TIA workspace folder, ready for
   *Import from workspace* in TIA. Setup → **Get an old version of a block back**.
 - **Releases and reports** — mark a version as a release (e.g. FAT, SAT), attach the archive, print any comparison

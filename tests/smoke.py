@@ -249,6 +249,11 @@ def check_app(repo, tmp):
         st, j = post("/api/restoreblock", {"rev": "HEAD~1", "path": "../outside.xml"})
         say(st == 200 and j.get("error") and not j.get("ok"), "a file outside the project is refused", str(j)[:200])
         runp(["git", "checkout", "--", rel], cwd=repo)
+        st, body = get("/view/block?t=%s&rev=HEAD~1&path=%s" % (token, urllib.request.quote(rel)))
+        say(st == 200 and "<svg" in body and "FC_Station" in body and "badge" not in body.split("<main>")[-1][:2000],
+            "View draws a whole block as it was in a version", body[:200])
+        st, body = get("/view/block?t=%s&rev=HEAD~1&path=%s" % (token, urllib.request.quote("../outside.xml")))
+        say(st == 200 and "not in that version" in body, "View refuses a file that is not a block of that version", body[:200])
 
         try:
             get("/api/state", with_token=False)
@@ -318,6 +323,25 @@ def check_moved_plc(tmp):
             "%s: no file is written to the old folder" % case, str(out))
 
 
+# --- 8. long tag names fit inside the drawing --------------------------------------------------
+def check_labels_fit():
+    print("Long tag names stay inside the drawing")
+    import importlib.machinery, importlib.util, re as _re
+    loader = importlib.machinery.SourceFileLoader("plcdiff_labels", str(APP))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    pd = importlib.util.module_from_spec(spec)
+    loader.exec_module(pd)
+    name = '"DB_010_Safety_Data"."010STU001_Display_secured_and_checked"'
+    for case, rows in (("coil fed by a gate", [{"pin": "", "block": pd.fbd_label('"I_Start"'), "neg": False}]),
+                       ("coil with nothing in front", [{"pin": "", "block": pd.B(0, 20, 10, ""), "neg": False}])):
+        b = pd.fbd_boxlike("=", name, rows, [], None, gate=True)
+        xs = [float(x) for x in _re.findall(r'<text[^>]*x="([-0-9.]+)"[^>]*text-anchor="start"[^>]*>(?:<title>[^<]*</title>)?[^<]*', b.svg)]
+        lab = pd.tmid(name, 44)
+        ok = all(x >= 0 for x in xs) and b.w >= max(xs) + pd.tw(lab)
+        say(ok, "%s: the label starts inside and the drawing is wide enough" % case, "w=%.0f xs=%s" % (b.w, xs))
+        say(name[-10:] in pd.tmid(name, 44), "%s: the end of a long name stays visible" % case)
+
+
 def main():
     keep = "--keep" in sys.argv
     print("PLC Diff smoke test - %s" % APP)
@@ -338,6 +362,7 @@ def main():
         check_work(repo)
         check_history(repo, tmp)
         check_moved_plc(tmp)
+        check_labels_fit()
         if "--no-app" not in sys.argv:
             check_app(repo, tmp)
         else:

@@ -51,7 +51,7 @@ very deep — keep paths and drawings robust for that.
 | Diffing | `compare_nets` (element multiset diff, pairs operand changes, box pin changes → `pins_old/new`), `align_nets` (SequenceMatcher over network fingerprints + title/similarity pairing), `diff_file` → `FileReport` |
 | Drawing | LAD: blocks (`blk_contact/coil/cmp/box`), `series`/`par_block`/`split_block`, `make_trie` (shared prefixes → branches to multiple coils), `net_svg`. FBD: `fbd_boxlike`, `fbd_block`, `net_svg_fbd`. `draw_net` picks LAD/FBD by network language (`FBD`/`F_FBD` → FBD). `tmid()` shortens long tag names in the middle so the end stays visible |
 | S7-GRAPH | `parse_graph_sequence`, `graph_summary`, `graph_links` (structure with branches resolved), `compare_graph`, `graph_svg` (layered layout: rank = longest path, column by DFS; branch bars; jumps as ↓S#), `html_graph_net` (chain before/after + changed conditions drawn as FBD) |
-| Report | `print_report` (terminal), `build_html` (compare page: TOC, SAFETY badges, safety bar, networks before/after, "Logic as text", sign-off sheet, print CSS / "Print / save as PDF") |
+| Report | `print_report` (terminal), `build_html` (compare page: TOC, SAFETY badges, safety bar, networks before/after, "Logic as text", sign-off sheet, print CSS / "Print / save as PDF"), `build_block_html` (one block in one version, every network drawn - `/view/block`) |
 | Git | `git()`, `rev_ok`, `rev_desc`, `changed_files` (rename limit raised; **pure moves R100 skipped**, counted in `moves`), `read_rev` (WORK = files on disk); `blocks_at` (exports that existed in a version), `restore_block` (write one
 export back into the workspace, or a copy elsewhere), `workspace_path` (where an export from an older version belongs in today's PLC folder), `export_place` (PLC, TIA folder and sub-folder of an export, for grouped lists); `NOWIN` hides console windows on Windows; `ensure_git_on_path` |
 | PLCs | `plcdiff.json` (`plcs: [{name, path, was?}]`), `plc_map`, `plc_prefixes` (current + earlier folders so history survives a move; inferred for exports that used to sit directly in `vci/`), `list_plcs`, `plc_of`, `plc_paths` (adds `:(exclude)` for nested PLC folders) |
@@ -62,7 +62,7 @@ export back into the workspace, or a copy elsewhere), `workspace_path` (where an
 HTTP endpoints: GET `/`, `/api/{ping,state,projects,suggest,revs}`, `/view/{report,history,csv,health}`;
 POST `/api/{pick,pickfile,open,identity,gitpath,clone,projects/add,projects/remove,scan,fetchall,newproject,init,
 remote,ignore,fixdouble,hook,commit,push,fetch,pull,resolve,plc,plcfolder,plcremove,addplc,moveplc,release,
-blocks,restoreblock,explore,quit,restart}`.
+blocks,restoreblock,explore,quit,restart}`; GET `/view/block?rev=&path=` draws one block.
 
 
 ## 5. What we learned about the formats (important — verified on real TIA V20 exports)
@@ -114,12 +114,17 @@ blocks,restoreblock,explore,quit,restart}`.
 - Compare across a folder move lost history for a single PLC → `plc_prefixes` / `was`.
 - Getting a block back from before a PLC folder move wrote it to the old folder, where TIA never looks →
   `workspace_path` maps it into today's folder (tested for inferred and `was` moves).
+- S7-GRAPH chains with 3+ parallel branches: transition labels ran into the next column's steps → columns are
+  400 px and a transition's text/highlight is capped to `COLW - STEP_W/2 - 12`.
+- FBD coil / instance names above a box were centred on the box and cut off when longer than the drawing (left
+  for a coil with nothing in front, right otherwise) → `fbd_boxlike` keeps the label inside and widens the drawing;
+  names are shortened in the middle (`tmid`) so the end stays visible. Checked on 4,384 real networks: none overflow.
 - Iframe height in CSS grid (150 px default) → `grid-template-rows:minmax(0,1fr)` + `height:100%`.
 
 
 ## 8. How we test
 
-- **`python tests/smoke.py` runs the whole checklist below in one go** (49 checks, ~20 s): both files compile,
+- **`python tests/smoke.py` runs the whole checklist below in one go** (55 checks, ~20 s): both files compile,
   a throwaway Git repo is built from the samples, the compare finds every kind of change (tag, interface, contact,
   box pin, call parameter, negated input, added/removed network), the HTML page really contains drawings and print
   CSS, `--files` / `--work` / `--history` work, the CSV has the BOM and `;` Excel needs, and the app itself starts,
