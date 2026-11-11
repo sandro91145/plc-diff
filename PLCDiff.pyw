@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 
-VERSION = "1.3.0"
+VERSION = "1.3.1"
 WORK = "<work>"          # marker for "files on disk"
 TEXT_EXT = {".scl", ".stl", ".awl", ".db", ".udt", ".s7dcl", ".s7res", ".txt", ".csv", ".md"}
 GATES = ("or", "and")
@@ -449,9 +449,24 @@ class Net:
                 res = [x for b in branches for x in b]
         else:
             m = self.main_in.get(uid)
-            res = (self.chain_of(self.pin_src.get((uid, m))) if m else []) + [{"t": "part", "id": uid, "p": p}]
+            if m:
+                res = self.chain_of(self.pin_src.get((uid, m))) + [{"t": "part", "id": uid, "p": p}]
+            else:
+                d = self._direct_op(p)              # FBD "A" = "B": a tag wired straight into the coil
+                if d:
+                    self._pcs[d["id"]] = {"t": "pc", "id": d["id"], "text": d["text"], "neg": d["neg"]}
+                res = ([self._pcs[d["id"]]] if d else []) + [{"t": "part", "id": uid, "p": p}]
         self._memo[uid] = res
         return res
+
+    def _direct_op(self, p):
+        """A tag wired straight into the input of a coil / NOT / contact (FBD), as an operand node - or None."""
+        if p.kind not in ("coil", "not", "contact"):
+            return None
+        k = (p.uid, "in")
+        if k in self.pin_src or k not in self.pin_val:
+            return None
+        return {"t": "op", "text": self.pin_val[k], "neg": "in" in p.negated, "id": "%s:in" % p.uid}
 
     # ---- FBD expression trees ------------------------------------------
     def fbd_tree(self, src, seen=frozenset()):
@@ -478,7 +493,7 @@ class Net:
             return {"t": "gate", "kind": p.kind, "id": "g" + uid, "ins": [inp(x) for x in ins],
                     "neg_out": "out" in p.negated}
         m = self.main_in.get(uid)
-        main = self.fbd_tree(self.pin_src.get((uid, m)), seen) if m else None
+        main = self.fbd_tree(self.pin_src.get((uid, m)), seen) if m else self._direct_op(p)
         if p.kind == "coil":                      # coil in the middle: passes the signal on
             return main
         if p.kind == "not":
@@ -498,7 +513,7 @@ class Net:
             if p.kind == "coil":
                 m = self.main_in.get(p.uid)
                 roots.append({"t": "assign", "p": p, "id": p.uid,
-                              "in": self.fbd_tree(self.pin_src.get((p.uid, m))) if m else None})
+                              "in": self.fbd_tree(self.pin_src.get((p.uid, m))) if m else self._direct_op(p)})
             else:
                 roots.append(self.fbd_tree(("pin", p.uid, "")))
         return [r for r in roots if r]
@@ -854,6 +869,7 @@ class FileReport:
         self.nets = []
         self.textdiff = []
         self.error = ""
+        self.note = ""      # "renumbered": same export, TIA only renumbered/reordered the parts; "other": see textdiff
 
     @property
     def doc(self):
@@ -1040,6 +1056,19 @@ def align_nets(old, new):
     return result
 
 
+def export_lines(data):
+    """The lines of an export without TIA's internal numbers (UId / ID), as a multiset: equal for two exports of
+    the same logic that TIA only renumbered or wrote in another order (it does that when a block is compiled or
+    exported again)."""
+    from collections import Counter
+    return Counter(re.sub(r'\s(?:UId|ID)="[^"]*"', "", l).strip()
+                   for l in (data or b"").decode("utf-8-sig", "replace").splitlines())
+
+
+NOTE_TEXT = {"renumbered": "no logic change - TIA only renumbered the parts inside the export",
+             "other": "nothing the drawing shows changed - only other parts of the export (comments, attributes ...)"}
+
+
 def diff_file(path, status, old_bytes, new_bytes):
     rep = FileReport(path, status)
     ext = Path(path).suffix.lower()
@@ -1079,6 +1108,8 @@ def diff_file(path, status, old_bytes, new_bytes):
         if doc.kind == "other" or (o and n and not rep.bullets and not any(x.status != "same" for x in rep.nets)):
             rep.textdiff = text_lines_diff(old_bytes.decode("utf-8-sig", "replace") if old_bytes else "",
                                            new_bytes.decode("utf-8-sig", "replace") if new_bytes else "")
+            if rep.textdiff and doc.kind != "other":
+                rep.note = "renumbered" if export_lines(old_bytes) == export_lines(new_bytes) else "other"
     except Exception as ex:  # never crash on an unexpected export
         rep.error = "%s: %s" % (type(ex).__name__, ex)
         rep.textdiff = text_lines_diff(old_bytes.decode("utf-8-sig", "replace") if old_bytes else "",
@@ -1491,7 +1522,7 @@ def fbd_block(node, marks, pins):
                "TrCoil": "Trans", "SvCoil": "Superv", "IlCoil": "Interl"}.get(p.name, p.name)
         mark = marks.get(p.uid)
         rows = [{"pin": "", "block": fbd_block(node["in"], marks, pins) if node["in"] else B(0, 20, 10, ""),
-                 "neg": p.etype == "negated coil"}]
+                 "neg": p.etype == "negated coil" or "in" in p.negated}]
         return fbd_boxlike(sym, p.operand, rows, [], None, top_mark=mark, gate=True)
     if t == "box":
         p = node["p"]
@@ -1924,7 +1955,10 @@ def print_report(meta, reports):
         if r.textdiff and not r.bullets and not any(n.status != "same" for n in r.nets):
             adds = sum(1 for l in r.textdiff if l.startswith("+"))
             dels = sum(1 for l in r.textdiff if l.startswith("-"))
-            print("  ~ text changed (+%d / -%d lines)" % (adds, dels))
+            if r.note:
+                print("  = %s (+%d / -%d lines in the file)" % (NOTE_TEXT[r.note], adds, dels))
+            else:
+                print("  ~ text changed (+%d / -%d lines)" % (adds, dels))
 
 
 CSS = r"""
@@ -1948,6 +1982,7 @@ main{max-width:1500px;margin:0 auto;padding:22px 28px 60px}
 .toc h2{font-size:13px;margin:0 0 8px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
 .toc a{color:var(--ink);text-decoration:none}.toc a:hover{color:var(--accent)}
 .toc li{margin:3px 0}.toc ul{margin:0;padding-left:18px}
+.nochange{background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;border-radius:8px;padding:10px 14px;margin:4px 0 10px;font-size:13px}
 .toc .tg{list-style:none;margin:8px 0 2px -18px;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
 .toc .tools{float:right;font-size:12px}.toc .tools a{color:var(--accent);margin-left:12px;cursor:pointer}
 details.grp{margin:0 0 14px}details.grp>summary{list-style:none;cursor:pointer;background:var(--card);border:1px solid var(--line);
@@ -2201,6 +2236,8 @@ def build_html(meta, reports, show_all):
                 nm = doc.name if doc else Path(r.path).name
                 nn = sum(1 for n in r.nets if n.status != "same")
                 extra = "%d network%s" % (nn, "" if nn == 1 else "s") if nn else ""
+                if not extra and not r.bullets and r.note:
+                    extra = "no logic change" if r.note == "renumbered" else "no drawn change"
                 if r.bullets:
                     extra = ", ".join(x for x in [extra, "%d other change%s" % (len(r.bullets), "" if len(r.bullets) == 1 else "s")] if x)
                 h.append('<li><a href="#f%d">%s</a>%s<span class="count">%s</span></li>' % (
@@ -2239,9 +2276,15 @@ def build_html(meta, reports, show_all):
                 h.append('<div class="same-list">%d unchanged network%s hidden (run with --all to show them).</div>' % (
                     len(same), "" if len(same) == 1 else "s"))
             if r.textdiff and (r.error or not (r.bullets or any(n.status != "same" for n in r.nets))):
-                if doc and doc.kind != "other" and not r.error:
-                    h.append('<div class="same-list">Only formatting or metadata changed. Raw text diff:</div>')
-                h.append(html_codediff(r.textdiff[:600]))
+                if r.note == "renumbered" and not r.error:
+                    h.append('<div class="nochange"><b>No logic change.</b> TIA only renumbered the parts inside this '
+                             'export - it does that when a block is compiled or exported again. Nothing to check here.</div>')
+                    h.append("<details><summary>Raw file differences</summary>%s</details>" % html_codediff(r.textdiff[:600]))
+                else:
+                    if r.note == "other" and not r.error:
+                        h.append('<div class="same-list">Nothing the drawing shows changed. The differences are in other '
+                                 'parts of the export (comments, attributes …):</div>')
+                    h.append(html_codediff(r.textdiff[:600]))
             h.append("</div></article>")
             if i in ends:
                 h.append("</details>")
@@ -2589,7 +2632,7 @@ def rows_for_report(rep):
     if not out and rep.textdiff:
         a = sum(1 for l in rep.textdiff if l.startswith("+"))
         d = sum(1 for l in rep.textdiff if l.startswith("-"))
-        out.append(dict(base, kind="chg", change="text changed (+%d / -%d lines)" % (a, d)))
+        out.append(dict(base, kind="chg", change=NOTE_TEXT[rep.note] if rep.note else "text changed (+%d / -%d lines)" % (a, d)))
     if rep.error and not out:
         out.append(dict(base, kind="chg", change="changed (couldn't read fully: %s)" % rep.error))
     return out

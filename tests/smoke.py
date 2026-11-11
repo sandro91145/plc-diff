@@ -96,6 +96,7 @@ WANT = [
     "network added",
     'NOT "I_ExtFault1" → "I_ExtFault1"',          # negated call input (FBD)
     "added reset coil (R)",                       # FBD coil
+    'input "I_Ready" → "I_ReadyOk"',              # FBD tag wired straight into a coil
 ]
 
 
@@ -355,6 +356,25 @@ def check_labels_fit():
     say(keys == ["Input.Start"], "a block interface member keeps its section", str(keys))
 
 
+# --- 9. exports TIA only rewrote ----------------------------------------------------------------
+def check_rewritten(tmp):
+    print("Exports TIA only rewrote")
+    d = tmp / "rewritten"
+    d.mkdir()
+    runp([PY, SAMPLES, d, "old"])
+    src = next(d.rglob("FC_Alarms.xml"))
+    text = src.read_text(encoding="utf-8")
+    ren = re.sub(r'UId="(\d+)"', lambda m: 'UId="%d"' % (int(m.group(1)) + 1000), text)
+    (d / "renumbered.xml").write_text(ren, encoding="utf-8")
+    code, out = app("--files", src, d / "renumbered.xml", "--text", "--no-open")
+    say("no logic change" in out and "text changed" not in out,
+        "a block TIA only renumbered says 'no logic change'", out[-300:])
+    (d / "attr.xml").write_text(text.replace('<Engineering version="V20" />', '<Engineering version="V20 Upd1" />'),
+                                encoding="utf-8")
+    code, out = app("--files", src, d / "attr.xml", "--text", "--no-open")
+    say("nothing the drawing shows changed" in out, "a change outside the drawing is still reported", out[-300:])
+
+
 def main():
     keep = "--keep" in sys.argv
     print("PLC Diff smoke test - %s" % APP)
@@ -376,6 +396,7 @@ def main():
         check_history(repo, tmp)
         check_moved_plc(tmp)
         check_labels_fit()
+        check_rewritten(tmp)
         if "--no-app" not in sys.argv:
             check_app(repo, tmp)
         else:

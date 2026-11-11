@@ -240,8 +240,17 @@ def fbd_motor(new):
     return cu(2, "Motor enable", nb.xml(), "FBD")
 
 
+def fbd_direct(new):
+    """FBD "Q_Ready" = "I_Ready": a tag wired straight into a coil, no gate in between."""
+    nb = NB()
+    src, q = nb.glob("I_ReadyOk" if new else "I_Ready"), nb.glob("Q_Ready")
+    k = coil(nb, q)
+    nb.w(src, (k, "in"))
+    return cu(3, "Ready lamp", nb.xml(), "FBD")
+
+
 def fbd_fc(new):
-    units = [fbd_ext(new), fbd_motor(new)]
+    units = [fbd_ext(new), fbd_motor(new), fbd_direct(new)]
     return fc("FC_Alarms", "176", iface([]), units).replace("<ProgrammingLanguage>LAD</ProgrammingLanguage></AttributeList><ObjectList>",
                                                                  "<ProgrammingLanguage>FBD</ProgrammingLanguage></AttributeList><ObjectList>")
 

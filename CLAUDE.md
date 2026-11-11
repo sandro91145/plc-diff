@@ -73,7 +73,8 @@ blocks,restoreblock,explore,quit,restart}`; GET `/view/block?rev=&path=` draws o
   `Contact` (negated via `<Negated Name="operand"/>`), `PContact`/`NContact` (pin `bit`). Coils: `Coil`, `SCoil`,
   `RCoil`… Compare boxes (`Gt`, `Eq`…) use pins `pre`/`in1`/`in2`. FBD gates: `A`/`O` with operands wired straight
   in, negation per input pin. Calls: `<Call><CallInfo Name BlockType><Instance/><Parameter Name Section Type/>`;
-  negated call inputs appear as `<Negated Name="<pin>"/>` on the Call.
+  negated call inputs appear as `<Negated Name="<pin>"/>` on the Call. FBD `"A" = "B"`: an `IdentCon` wired
+  straight into a coil's `in` pin (no gate) - very common (500+ coils in one real project); `_direct_op` reads it.
 - **S7-GRAPH** (FB, language GRAPH): `NetworkSource/Graph` with `PreOperations/PermanentOperation*` (FlgNet),
   `Sequence` → `Steps/Step(Number, Init, Name, MaximumStepTime, WarningTime)` with `Actions/Action(Qualifier,
   Event?)` of `Token`s, `Supervisions/Supervision` and `Interlocks/Interlock` (FlgNet ending in `SvCoil`/`IlCoil`);
@@ -88,6 +89,9 @@ blocks,restoreblock,explore,quit,restart}`; GET `/view/block?rev=&path=` draws o
   `Program blocks\Program blocks`; dragging a device can add extra levels like `vci\<project>\<PLC>\...`.
   That's why PLC folders are configurable (`Setup → PLCs → Change folder…`) and the doubled-folder fix exists.
 - Exports are UTF-8 (sometimes BOM); Git may convert line endings — compare ignores CRLF-only differences.
+- After a compile or re-export TIA may **renumber the parts** (`UId`s) and write them in another order, with no logic
+  change. `export_lines` (lines without UId/ID numbers, as a multiset) recognises that → `rep.note = "renumbered"`,
+  shown as "no logic change"; other differences outside the drawing → `note = "other"` with the raw diff.
 
 
 ## 6. Decisions and why
@@ -121,12 +125,14 @@ blocks,restoreblock,explore,quit,restart}`; GET `/view/block?rev=&path=` draws o
   names are shortened in the middle (`tmid`) so the end stays visible. Checked on 4,384 real networks: none overflow.
 - Data type (UDT) members showed as `None.Member`: TIA calls a UDT's only section "None" → `iface_members` leaves
   that section name out (block interfaces keep `Input.`, `Static.` …).
+- FBD coils fed straight by a tag were read as `:= TRUE` and drawn with nothing in front, so a change of that tag
+  was missed → `chain_of` / `fbd_tree` / `fbd_roots` use `_direct_op`. The samples have such a network now.
 - Iframe height in CSS grid (150 px default) → `grid-template-rows:minmax(0,1fr)` + `height:100%`.
 
 
 ## 8. How we test
 
-- **`python tests/smoke.py` runs the whole checklist below in one go** (59 checks, ~20 s): both files compile,
+- **`python tests/smoke.py` runs the whole checklist below in one go** (61 checks, ~20 s): both files compile,
   a throwaway Git repo is built from the samples, the compare finds every kind of change (tag, interface, contact,
   box pin, call parameter, negated input, added/removed network), the HTML page really contains drawings and print
   CSS, `--files` / `--work` / `--history` work, the CSV has the BOM and `;` Excel needs, and the app itself starts,
