@@ -19,7 +19,8 @@ It runs on your own PC, opens in your browser, and needs nothing but Python and 
 
 - **Compare versions** — any two commits, or your unsaved export against the last commit. LAD drawn as ladder,
   FBD as FBD, S7-GRAPH as a step chain (steps, transitions, branches, jumps, supervisions, interlocks),
-  SCL/STL as a text diff. Also data blocks, UDTs and tag tables.
+  SCL/STL as a text diff. Also data blocks, UDTs and tag tables. Changed files are grouped like TIA's project tree (Program blocks, PLC tags,
+  PLC data types, …), each group opens and closes.
 - **Change history** — every change with date, time and author, searchable, with charts, and a download for Excel.
 - **Commit and share** — one button to save ("commit") and send ("push") your changes, with a suggested message
   that lists what changed. Pull, conflicts (keep mine / use theirs) are handled for you.

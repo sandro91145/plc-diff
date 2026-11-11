@@ -126,6 +126,10 @@ def check_html(repo, tmp):
     say(h.count("<svg") >= 6, "networks are drawn (%d svg)" % h.count("<svg"))
     say("Traceback" not in h and "not understood" not in h, "nothing left undrawn",
         "page says a block was not understood")
+    groups = re.findall(r'<details class="grp"[^>]*><summary>([^<]+)<', h)
+    say(groups == ["Program blocks", "PLC tags"], "changed files are grouped by TIA folder, in TIA's order", str(groups))
+    first_tag = h.find('id="f', h.find('<details class="grp"', h.find('<details class="grp"') + 1))
+    say(h.find("<summary>PLC tags<") < first_tag, "each file sits inside its folder's group")
 
 
 def check_files_mode(repo, tmp):
