@@ -135,6 +135,26 @@ def check_html(repo, tmp):
     say(h.find("<summary>PLC tags<") < first_tag, "each file sits inside its folder's group")
     say('<table class="mt">' in h and "1200" in h and "1500" in h and ">moved<" in h,
         "data block changes are a table (start value, moved member)")
+    side = h[h.find('<aside class="sidenav">'):h.find("</aside>")]
+    say(side.count('data-f="f') == h.count('<article class="file') >= 3 and "<details open>" in side,
+        "the sidebar lists every changed file, grouped by TIA folder")
+    say("Whole drawing" in h and "zfit" in h, "big drawings get the zoom-out / zoom-in tools")
+    import re as _re
+    secs = _re.findall(r'<section id="f\d+n\d+" data-k="([^"]*)" class="net (\w+)', h)
+    say(secs and all(k for k, _ in secs) and h.count('<section class="net ') == 0 and "No network matches" in h,
+        "every changed network can be folded and filtered (%d networks)" % len(secs))
+    say('<div class="ntools"' in h and 'data-k="new"' in h and 'placeholder="Find a tag in this block' in h,
+        "a block with 3+ changed networks gets the go-to / show-only / find toolbar")
+    say('<div class="side pair"><div class="col"><div class="cap">Before' in h,
+        "a changed LAD / FBD network is drawn before | after side by side")
+    say('<div class="gview">' in h and all('<div class="gchg" data-g="%s" hidden>' % k in h for k in ("S2", "S3", "T2"))
+        and 'rect data-g="S2"' in h, "a changed S7-GRAPH shows the whole sequence, each change opens before | after")
+    say("transition T2: condition changed" in h, "a transition whose condition is one tag wired straight in is compared")
+    import importlib.machinery as _ilm, importlib.util as _ilu
+    _ld = _ilm.SourceFileLoader("pdm", str(APP)); _sp = _ilu.spec_from_loader("pdm", _ld); _pd = _ilu.module_from_spec(_sp); _ld.exec_module(_pd)
+    _long = '"FGDB_010XYZ003-QM1@AddOn".AddS.Belegt_Type_C_with_a_long_tail'
+    say(_long.replace('"', "&quot;") in _pd.fbd_label(_long).svg or _long in _pd.fbd_label(_long).svg,
+        "long tag names are drawn whole, not shortened in the middle")
 
 
 def check_files_mode(repo, tmp):

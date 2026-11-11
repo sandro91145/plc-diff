@@ -1164,6 +1164,9 @@ def trunc(s, n=30):
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
+NAME_MAX = 120     # tag names in LAD / FBD drawings are shown whole: the middle (e.g. a device number) matters
+
+
 def tmid(s, n=34):
     s = str(s)
     if len(s) <= n:
@@ -1194,7 +1197,7 @@ def text(x, y, s, cls="t", anchor="middle", full=None):
 
 
 def blk_contact(label, mark, sym="", neg=False, below=""):
-    lab, bl = tmid(label, 32), tmid(below, 32)
+    lab, bl = tmid(label, NAME_MAX), tmid(below, NAME_MAX)
     w = max(64, tw(lab) + 16, tw(bl) + 16 if bl else 0)
     L, h = 30, 50 + (14 if bl else 0)
     cx = w / 2
@@ -1212,7 +1215,7 @@ def blk_contact(label, mark, sym="", neg=False, below=""):
 
 
 def blk_coil(label, mark, sym="", neg=False):
-    lab = tmid(label, 32)
+    lab = tmid(label, NAME_MAX)
     w = max(64, tw(lab) + 16)
     L, h = 30, 50
     cx = w / 2
@@ -1230,7 +1233,7 @@ def blk_coil(label, mark, sym="", neg=False):
 
 
 def blk_cmp(p, mark):
-    a, b = trunc(p.in1, 30), trunc(p.in2, 30)
+    a, b = tmid(p.in1, NAME_MAX), tmid(p.in2, NAME_MAX)
     op = CMP_OPS.get(p.name, p.name)
     w = max(72, tw(a) + 16, tw(b) + 16)
     L, h = 36, 76
@@ -1257,12 +1260,12 @@ def blk_not(mark):
 
 
 def blk_box(p, mark, changed_pins=None):
-    title, inst = trunc(p.title, 34), trunc(p.instance, 40)
+    title, inst = tmid(p.title, NAME_MAX), tmid(p.instance, NAME_MAX)
     ins = list(p.ins) or [("", "", True)]
     outs = list(p.outs)
     rows = max(len(ins), len(outs), 1)
-    lw = max([tw(trunc(v, 34)) for _, v, m in ins if not m] + [0]) + 20
-    rw = max([tw(trunc(v, 34)) for _, v, pw in outs if not pw] + [0]) + 20
+    lw = max([tw(tmid(v, NAME_MAX)) for _, v, m in ins if not m] + [0]) + 20
+    rw = max([tw(tmid(v, NAME_MAX)) for _, v, pw in outs if not pw] + [0]) + 20
     lw, rw = max(lw, 28), max(rw, 28)
     pin_l = max([len(x) for x, _, _ in ins] + [0]) * CW
     pin_r = max([len(x) for x, _, _ in outs] + [0]) * CW
@@ -1281,7 +1284,7 @@ def blk_box(p, mark, changed_pins=None):
         s = [hl(w, h, mark)]
 
     def pin_hl(x, y, val, anchor):
-        vw = tw(trunc(val, 34)) + 8
+        vw = tw(tmid(val, NAME_MAX)) + 8
         x0 = x - vw + 4 if anchor == "end" else x - 4
         return '<rect x="%.1f" y="%.1f" width="%.1f" height="16" rx="3" fill="%s" stroke="%s"/>' % (
             x0, y - 8, vw, HL["chg"][1], HL["chg"][0])
@@ -1297,7 +1300,7 @@ def blk_box(p, mark, changed_pins=None):
             s.append('<path class="w" d="M%.1f %.1f H%.1f"/>' % (bx - 8, y, bx))
             if pin in changed_pins:
                 s.append(pin_hl(bx - 11, y, val, "end"))
-            s.append(text(bx - 11, y + 4, trunc(val, 34), "t", "end", full=val))
+            s.append(text(bx - 11, y + 4, tmid(val, NAME_MAX), "t", "end", full=val))
         if pin:
             s.append(text(bx + 5, y + 4, pin, "tp", "start"))
     for i, (pin, val, pw) in enumerate(outs):
@@ -1308,7 +1311,7 @@ def blk_box(p, mark, changed_pins=None):
             s.append('<path class="w" d="M%.1f %.1f H%.1f"/>' % (bx + bw, y, bx + bw + 8))
             if pin in changed_pins:
                 s.append(pin_hl(bx + bw + 11, y, val, "start"))
-            s.append(text(bx + bw + 11, y + 4, trunc(val, 34), "t", "start", full=val))
+            s.append(text(bx + bw + 11, y + 4, tmid(val, NAME_MAX), "t", "start", full=val))
         s.append(text(bx + bw - 5, y + 4, pin, "tp", "end"))
     return B(w, h, L, "".join(s))
 
@@ -1435,7 +1438,7 @@ def net_svg(net, marks, pins=None):
 # ---- FBD drawing -----------------------------------------------------------
 
 def fbd_label(txt, mark=None, neg=False):
-    lab = tmid(txt, 34)
+    lab = tmid(txt, NAME_MAX)
     w = tw(lab) + 22
     s = []
     if mark:
@@ -1452,7 +1455,7 @@ def fbd_boxlike(title, top_label, rows, outs, mark, top_mark=None, gate=False, n
     ROW, HEAD, WIRE = 20, (20 if not gate else 18), 14
     pin_l = max([len(r["pin"]) for r in rows] + [0]) * CW
     pin_r = max([len(o[0]) for o in outs] + [0]) * CW
-    bw = max(46 if gate else 84, tw(trunc(title, 34)) + 20, pin_l + pin_r + 26)
+    bw = max(46 if gate else 84, tw(tmid(title, NAME_MAX)) + 20, pin_l + pin_r + 26)
     lw = max([r["block"].w for r in rows] + [0]) + WIRE
     top = 20 if top_label else 4
     # vertical placement of input rows
@@ -1468,12 +1471,12 @@ def fbd_boxlike(title, top_label, rows, outs, mark, top_mark=None, gate=False, n
               for i in range(n_out)]
     last = max(ys + out_ys + [top + HEAD + ROW / 2])
     box_h = last + ROW / 2 + 2 - top
-    rw = max([tw(trunc(o[1], 34)) for o in outs if not o[2]] + [0]) + 20 if outs else 0
+    rw = max([tw(tmid(o[1], NAME_MAX)) for o in outs if not o[2]] + [0]) + 20 if outs else 0
     if outs and all(o[2] for o in outs):
         rw = 18
     x0 = lw
     w = lw + bw + rw
-    lab = tmid(top_label, 44) if top_label else ""          # keep the end of the name visible
+    lab = tmid(top_label, NAME_MAX) if top_label else ""    # whole name (only absurdly long ones are shortened)
     lab_x = max(2, x0 + bw / 2 - tw(lab) / 2)          # centred over the box, but never left of the drawing
     w = max(w, lab_x + tw(lab) + 4)                     # ... and the drawing is wide enough for the whole label
     h = max(top + box_h, max([py + b.h for _, py, b in placed] + [0])) + 4
@@ -1486,7 +1489,7 @@ def fbd_boxlike(title, top_label, rows, outs, mark, top_mark=None, gate=False, n
     for px, py, b in placed:
         s.append(g(px, py, b.svg))
     s.append('<rect class="w box" x="%.1f" y="%d" width="%.1f" height="%.1f" rx="2"/>' % (x0, top, bw, box_h))
-    s.append(text(x0 + bw / 2, top + 14, trunc(title, 34), "tb", full=title))
+    s.append(text(x0 + bw / 2, top + 14, tmid(title, NAME_MAX), "tb", full=title))
     if top_label:
         if top_mark:
             st, fill = HL[top_mark]
@@ -1509,10 +1512,10 @@ def fbd_boxlike(title, top_label, rows, outs, mark, top_mark=None, gate=False, n
         else:
             s.append('<path class="w" d="M%.1f %.1f H%.1f"/>' % (start, y, x0 + bw + 8))
             if hlp:
-                lab = trunc(val, 34)
+                lab = tmid(val, NAME_MAX)
                 s.append('<rect x="%.1f" y="%.1f" width="%.1f" height="16" rx="3" fill="%s" stroke="%s"/>' % (
                     x0 + bw + 7, y - 8, tw(lab) + 8, HL["chg"][1], HL["chg"][0]))
-            s.append(text(x0 + bw + 11, y + 4, trunc(val, 34), "t", "start", full=val))
+            s.append(text(x0 + bw + 11, y + 4, tmid(val, NAME_MAX), "t", "start", full=val))
         if pin:
             s.append(text(x0 + bw - 5, y + 4, pin, "tp", "end"))
     return B(w, h, ys[0] if ys else top + HEAD + ROW / 2, "".join(s))
@@ -1634,7 +1637,8 @@ def cond_net(el, title):
 def cond_text(n):
     for p in n.parts.values():
         if p.name in GRAPH_COIL_NAMES:
-            return n.expr_text(n._pred(p))
+            d = None if n.main_in.get(p.uid) else n._direct_op(p)     # a single tag wired straight into the coil
+            return ("NOT " if d["neg"] else "") + d["text"] if d else n.expr_text(n._pred(p))
     return " ; ".join(n.statements)
 
 
@@ -1885,8 +1889,8 @@ def graph_svg(g, marks):
         mark = marks.get(sid)
         if mark:
             stc, fill = HL[mark]
-            s.append('<rect x="%.1f" y="%.1f" width="%d" height="%d" rx="6" fill="%s" stroke="%s" stroke-width="1.5"/>' % (
-                x - STEP_W / 2 - 5, t - 5, STEP_W + 10, STEP_H + 10, fill, stc))
+            s.append('<rect data-g="%s" x="%.1f" y="%.1f" width="%d" height="%d" rx="6" fill="%s" stroke="%s" stroke-width="1.5"/>' % (
+                sid, x - STEP_W / 2 - 5, t - 5, STEP_W + 10, STEP_H + 10, fill, stc))
         s.append('<rect class="w box" x="%.1f" y="%.1f" width="%d" height="%d" rx="2"/>' % (x - STEP_W / 2, t, STEP_W, STEP_H))
         if st["init"]:
             s.append('<rect class="w" x="%.1f" y="%.1f" width="%d" height="%d" rx="1"/>' % (
@@ -1913,8 +1917,8 @@ def graph_svg(g, marks):
         tw_ = min(max(tw(trunc(lab, 36)) * 1.05, tw(trunc(cond, 40))) + 34, COLW - STEP_W / 2 - 12)
         if mark:
             stc, fill = HL[mark]
-            s.append('<rect x="%.1f" y="%.1f" width="%.1f" height="%d" rx="6" fill="%s" stroke="%s" stroke-width="1.5"/>' % (
-                x - 18, t + 1, tw_, TR_H - 2, fill, stc))
+            s.append('<rect data-g="%s" x="%.1f" y="%.1f" width="%.1f" height="%d" rx="6" fill="%s" stroke="%s" stroke-width="1.5"/>' % (
+                tid, x - 18, t + 1, tw_, TR_H - 2, fill, stc))
         if not any(a == tid for a, *_ in g["edges"]) and not jumps.get(tid):
             pass
         s.append('<path class="w" d="M%.1f %.1f V%.1f" />' % (x, t, t + TR_H))
@@ -1929,8 +1933,48 @@ def graph_svg(g, marks):
             % (W, H, W, H, "".join(s)))
 
 
+def html_graph_change(nd, meta):
+    """A changed S7-GRAPH: first the whole sequence; a click on a change shows that step / transition
+    before | after, with what changed and its changed conditions (GRAPH_JS builds the before | after view)."""
+    view = meta.get("view", "auto")
+    ids = sorted(set(nd.marks_old) | set(nd.marks_new), key=lambda k: (k[0] != "S", natkey(k)))
+    chips = "".join('<button data-g="%s" class="%s">%s</button>' % (
+        k, nd.marks_new.get(k) or nd.marks_old.get(k), k) for k in ids)
+    h = ['<div class="gview"><div class="gbar gbw"><span class="gsw"><button data-v="new" class="on">After</button>'
+         '<button data-v="old">Before</button></span><span>%d change%s:</span>%s'
+         '<span class="zh">Click a marked step or transition to see it before | after.</span></div>' % (
+             len(ids), "" if len(ids) == 1 else "s", chips)]
+    h.append('<div class="gwhole"><div class="gw gnew"><div class="cap">Whole sequence after · <code>%s</code></div>'
+             '<div class="ladwrap">%s</div></div><div class="gw gold" hidden><div class="cap">Whole sequence before · '
+             '<code>%s</code></div><div class="ladwrap">%s</div></div></div>' % (
+                 esc(meta["new_short"]), graph_svg(nd.new.graph, nd.marks_new),
+                 esc(meta["old_short"]), graph_svg(nd.old.graph, nd.marks_old)))
+    for k in ids:
+        word = re.compile(r"(?<![\w])%s(?![\w])" % re.escape(k))
+        notes = [b for b in nd.bullets if word.search(b[1])]
+        dets = [(label, cd) for label, cd in getattr(nd, "details", []) or [] if label.split(" ", 1)[0] == k]
+        h.append('<div class="gchg" data-g="%s" hidden><div class="gbar"><button class="gback">← Whole sequence</button>'
+                 '<button class="gprev">‹ Previous</button><button class="gnext">Next ›</button><b class="gttl">%s</b></div>%s' % (
+                     k, esc(k), html_bullets(notes)))
+        for label, cd in dets:                  # a changed condition / supervision / interlock first
+            h.append('<div class="gdet"><div class="gdh">%s</div><div class="side pair"><div class="col"><div class="cap">'
+                     'Before</div><div class="ladwrap">%s</div></div><div class="col"><div class="cap">After</div>'
+                     '<div class="ladwrap">%s</div></div></div></div>' % (
+                         esc(label), draw_net(cd.old, cd.marks_old, cd.pins_old, view),
+                         draw_net(cd.new, cd.marks_new, cd.pins_new, view)))
+        h.append('%s<div class="gpair%s"><div class="gcol" data-v="old"><div class="cap">Before · <code>%s</code></div>'
+                 '<div class="gbox"></div></div><div class="gcol" data-v="new"><div class="cap">After · <code>%s</code></div>'
+                 '<div class="gbox"></div></div></div></div>' % (
+                     '<div class="gdh gwhere">Where it is in the sequence</div>' if dets else "", " small" if dets else "",
+                     esc(meta["old_short"]), esc(meta["new_short"])))
+    h.append("</div>")
+    return "".join(h)
+
+
 def html_graph_net(nd, meta):
     view = meta.get("view", "auto")
+    if nd.status == "changed" and nd.old is not None and nd.new is not None and (nd.marks_old or nd.marks_new):
+        return html_graph_change(nd, meta)
     h = ['<div class="side">']
     if nd.old is not None and nd.status != "same":
         h.append('<div class="cap">Before · <code>%s</code></div><div class="ladwrap">%s</div>' % (
@@ -2018,6 +2062,56 @@ table.bh td{padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px;
 table.bh a{color:var(--accent);text-decoration:none;white-space:nowrap}table.bh tr.now td{background:#fffbeb}
 .commits .rvok{color:#86efac;font-size:12px}.commits .rvno{color:#94a3b8;font-size:12px}.commits .rvno a{color:#67e8f9}
 .signoff td.rv{font-size:13px;padding:6px 8px;color:#0f172a}
+.layout{display:grid;grid-template-columns:300px minmax(0,1fr);align-items:start}.layout>main{margin:0;max-width:1500px}
+.sidenav{position:sticky;top:0;max-height:100vh;overflow:auto;padding:22px 8px 40px 18px;font-size:13px}
+.sidenav .snh{display:flex;flex-direction:column;gap:2px;margin:0 0 10px 6px}.sidenav .snh b{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.sidenav .snh a{color:var(--accent);cursor:pointer;font-size:12px}
+.sidenav details{background:var(--card);border:1px solid var(--line);border-radius:10px;margin:0 0 8px;padding:4px}
+.sidenav summary{cursor:pointer;font-weight:600;padding:6px 8px;color:var(--ink);font-size:13px}.sidenav summary span{color:var(--muted);font-weight:400;margin-left:6px}
+.sidenav a[data-f]{display:block;padding:5px 8px;border-radius:6px;color:var(--ink);text-decoration:none;line-height:1.3}
+.sidenav a[data-f]:hover{background:#f1f5f9}.sidenav a[data-f].on{background:#ecfeff;box-shadow:inset 3px 0 0 var(--accent)}
+.sidenav a[data-f] b{font-weight:500;overflow-wrap:anywhere}.sidenav a[data-f] small{display:block;color:var(--muted);font-size:11px}
+.sidenav .snlist{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:4px}
+@media (min-width:961px){.layout .toc{display:none}}
+@media (max-width:960px){.layout{display:block}.sidenav{display:none}}
+@media (max-width:1300px){.layout{grid-template-columns:240px minmax(0,1fr)}}
+.ztools{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 6px;font-size:12px;color:var(--muted)}
+.ztools button{font:600 12px "Segoe UI",sans-serif;border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 9px;cursor:pointer;color:var(--ink)}
+.ztools button.zc{background:var(--chgbg);border-color:#fcd34d;min-width:26px}.ztools .zh{margin-left:6px}
+.ztools[data-m="fit"] .zb[data-a="fit"],.ztools[data-m="full"] .zb[data-a="full"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.ladwrap.zfit svg{cursor:zoom-in}.ladwrap.zfull{max-height:78vh;overflow:auto}
+rect.zpulse{animation:zp .5s ease-in-out 3}@keyframes zp{50%{stroke-width:6}}
+.nh .ncnt{margin-left:auto;display:flex;gap:4px}.nh .ncnt i{font:600 11px Consolas,monospace;padding:2px 6px;border-radius:5px}
+.ncnt i.add{background:var(--addbg);color:var(--add)}.ncnt i.del{background:var(--delbg);color:var(--del)}.ncnt i.chg{background:var(--chgbg);color:var(--chg)}
+section.net[data-k] .nh{cursor:pointer}section.net[data-k]{scroll-margin-top:96px}.nh .nfold{color:var(--muted);font-size:13px;width:14px;text-align:center}
+.nh .nfold{display:none}section.net[data-k] .nh .nfold{display:inline}
+section.net.fold > :not(.nh){display:none}section.net.fold .nfold{transform:rotate(-90deg)}section.net.nhide{display:none}
+.ntools{background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin:10px 0 4px;font-size:12px;color:var(--muted);
+position:sticky;top:0;z-index:2;display:flex;flex-direction:column;gap:6px}
+.ntools>div{display:flex;flex-wrap:wrap;gap:6px;align-items:center}.ntools b{color:var(--ink)}
+.ntools .njump a{display:inline-block;min-width:22px;text-align:center;padding:2px 5px;border-radius:5px;cursor:pointer;font:600 11px Consolas,monospace;
+border:1px solid var(--line);background:#fff;color:var(--ink);margin:1px}
+.ntools .njump a.changed{border-color:#fcd34d;background:var(--chgbg)}.ntools .njump a.added{border-color:#86efac;background:var(--addbg)}
+.ntools .njump a.removed{border-color:#fca5a5;background:var(--delbg)}.ntools .njump a.off{opacity:.3}
+.ntools button{font:600 12px "Segoe UI",sans-serif;border:1px solid var(--line);background:#fff;border-radius:999px;padding:3px 10px;cursor:pointer;color:var(--ink)}
+.ntools button span{color:var(--muted);font-weight:400}.ntools button.on{background:var(--ink);color:#fff;border-color:var(--ink)}.ntools button.on span{color:#cbd5e1}
+.ntools input{font:12px "Segoe UI",sans-serif;border:1px solid var(--line);border-radius:6px;padding:4px 8px;width:200px;margin-left:6px}
+.ntools a[data-a]{color:var(--accent);cursor:pointer;font-weight:600;margin-left:8px}.ntools .nmsg{margin-left:8px;color:var(--ink)}
+.side.pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:1100px){.side.pair{display:block}}
+.gbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 6px;font-size:12px;color:var(--muted)}
+.gbar button{font:600 12px "Segoe UI",sans-serif;border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 9px;cursor:pointer;color:var(--ink)}
+.gbar button.chg{background:var(--chgbg);border-color:#fcd34d}.gbar button.add{background:var(--addbg);border-color:#86efac}
+.gbar button.del{background:var(--delbg);border-color:#fca5a5}.gbar button:disabled{opacity:.35;cursor:default}
+.gsw{display:inline-flex;margin-right:8px}.gsw button{border-radius:0}.gsw button:first-child{border-radius:6px 0 0 6px}
+.gsw button:last-child{border-radius:0 6px 6px 0;margin-left:-1px}.gsw button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.gbar .gback{background:var(--ink);color:#fff;border-color:var(--ink)}.gbar .gttl{color:var(--ink);font-size:14px;margin-left:8px}
+.gchg{scroll-margin-top:100px}.gview .gbar[hidden]{display:none}.gpair.small .gbox{height:42vh}
+.gwhere{margin-top:14px;border-top:1px dashed var(--line);padding-top:10px}
+.gpair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+.gbox{height:60vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px}
+.gbox.gnone{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;padding:20px;text-align:center}
+.gchg ul.b{margin-top:12px}
 .nochange{background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;border-radius:8px;padding:10px 14px;margin:4px 0 10px;font-size:13px}
 .toc .tg{list-style:none;margin:8px 0 2px -18px;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
 .toc .tools{float:right;font-size:12px}.toc .tools a{color:var(--accent);margin-left:12px;cursor:pointer}
@@ -2028,7 +2122,7 @@ details.grp>summary:before{content:"▸";color:var(--muted);width:12px}details.g
 details.grp>summary .count{color:var(--muted);font-weight:400;font-size:13px}
 details.grp[open]>summary{margin-bottom:12px}
 .count{color:var(--muted);font-size:12px;margin-left:6px}
-.file{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:26px;overflow:hidden}
+.file{background:var(--card);border:1px solid var(--line);border-radius:12px;margin-bottom:26px;overflow:hidden;overflow:clip}
 .file>.fh{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;align-items:baseline;gap:10px}
 .fh h2{margin:0;font-size:17px}
 .fh .path{color:var(--muted);font:12px Consolas,monospace;word-break:break-all}
@@ -2087,7 +2181,9 @@ display:flex;flex-direction:column;gap:2px}.safetybar small{color:#991b1b}
   body{background:#fff}header{background:#fff;color:#0f172a;border-bottom:2px solid #0f172a;padding:10px 0}
   header h1{color:#0f172a}.rev{background:#fff;border-color:#cbd5e1;color:#0f172a}.rev code{color:#0f172a}
   .commits{color:#334155}.commits code{color:#0f172a}.brand{color:#0e7490}
-  .printbtn,.legend span:last-child,details summary,.toc .tools{display:none}
+  .printbtn,.legend span:last-child,details summary,.toc .tools,.sidenav,.ztools,.ntools,.nh .nfold,.gbar,.gpair{display:none}
+  .side.pair{display:block}.gview .gwhole[hidden],.gview .gw[hidden],.gview .gchg[hidden]{display:block!important}
+  .layout{display:block}.layout .toc{display:block}.ladwrap.zfull{max-height:none}
   details.grp>summary{display:flex;border:0;border-bottom:2px solid #0f172a;border-radius:0;padding:6px 0}details.grp>summary:before{content:""}
   main{padding:10px 0;max-width:none}.ladwrap{overflow:visible;border:0;padding:0}svg.lad{max-width:100%;height:auto}
   .net{break-inside:avoid}.file{break-inside:auto;border:1px solid #cbd5e1}.toc{break-after:avoid}
@@ -2143,14 +2239,17 @@ def html_net(nd, meta):
             h.append(html_codediff(lines))
         h.append("</section>")
         return "".join(h)
-    h.append('<div class="side">')
+    pair = st == "changed" and nd.old is not None and nd.new is not None
+    h.append('<div class="side pair">' if pair else '<div class="side">')
     if nd.old is not None and st != "same":
-        h.append('<div class="cap">Before · <code>%s</code></div><div class="ladwrap">%s</div>' % (
-            esc(meta["old_short"]), draw_net(nd.old, nd.marks_old, nd.pins_old, meta.get("view", "auto"))))
+        h.append('%s<div class="cap">Before · <code>%s</code></div><div class="ladwrap">%s</div>%s' % (
+            '<div class="col">' if pair else "", esc(meta["old_short"]),
+            draw_net(nd.old, nd.marks_old, nd.pins_old, meta.get("view", "auto")), "</div>" if pair else ""))
     if nd.new is not None:
         cap = "After" if st != "same" else "Network"
-        h.append('<div class="cap">%s · <code>%s</code></div><div class="ladwrap">%s</div>' % (
-            cap, esc(meta["new_short"]), draw_net(nd.new, nd.marks_new, nd.pins_new, meta.get("view", "auto"))))
+        h.append('%s<div class="cap">%s · <code>%s</code></div><div class="ladwrap">%s</div>%s' % (
+            '<div class="col">' if pair else "", cap, esc(meta["new_short"]),
+            draw_net(nd.new, nd.marks_new, nd.pins_new, meta.get("view", "auto")), "</div>" if pair else ""))
     h.append("</div>")
     if st != "same":
         a = nd.old.statements if nd.old else []
@@ -2182,15 +2281,213 @@ def report_groups(reports):
     return [(k, v[2]) for k, v in order]
 
 
+def net_kinds(nd):
+    """What a changed network is about, for the filter buttons: new / gone, or parts added / removed / changed."""
+    if nd.status == "added":
+        return ["new"]
+    if nd.status == "removed":
+        return ["gone"]
+    ks = {c for c, t in nd.bullets if not t.startswith("network")}
+    return [k for k in ("add", "del", "chg") if k in ks] or ["chg"]
+
+
+def net_with_tools(nd, meta, nid):
+    """A changed network with an id, its kinds for the filter, and +/−/~ counts in its title line (click it to fold)."""
+    s = html_net(nd, meta)
+    n = {c: sum(1 for k, t in nd.bullets if k == c and not t.startswith("network")) for c in ("add", "del", "chg")}
+    cnt = "" if nd.status in ("added", "removed") else "".join(
+        '<i class="%s" title="%s">%s%d</i>' % (c, tip, sg, n[c]) for c, sg, tip in (
+            ("add", "+", "parts added"), ("del", "−", "parts removed"), ("chg", "~", "parts changed")) if n[c])
+    s = s.replace('<section class="net ', '<section id="%s" data-k="%s" class="net ' % (nid, " ".join(net_kinds(nd))), 1)
+    return s.replace("</div>", '<span class="ncnt">%s</span><span class="nfold" title="Fold / unfold">▾</span></div>' % cnt, 1)
+
+
+NET_KINDS = (("new", "New networks"), ("gone", "Removed networks"), ("add", "Parts added"),
+             ("del", "Parts removed"), ("chg", "Parts changed"))
+
+
+def net_toolbar(r, i, secs):
+    """Above the networks of a block with 3 or more changed networks: jump to one, show only one kind, find a tag, fold."""
+    if len(secs) < 3:
+        return ""
+    ks = [re.search(r'data-k="([^"]*)"', x).group(1).split() for x in secs]
+    def jump_link(j, x):
+        st = re.search(r'class="net (\w+)', x).group(1)
+        head = re.search(r"<b>([^<]*)</b>", x).group(1)
+        nt = re.search(r'<span class="nt">([^<]*)</span>', x)
+        return '<a data-n="f%dn%d" class="%s" title="%s%s">%s</a>' % (
+            i, j, st, head, " · " + nt.group(1) if nt else "", re.sub(r"\D", "", head) or "G")
+    jump = "".join(jump_link(j, x) for j, x in enumerate(secs))
+    flt = "".join('<button data-k="%s">%s <span>%d</span></button>' % (k, lab, sum(1 for x in ks if k in x))
+                  for k, lab in NET_KINDS if any(k in x for x in ks))
+    return ('<div class="ntools" data-f="f%d"><div><b>%d changed networks</b> · Go to: <span class="njump">%s</span></div>'
+            '<div><span>Show only:</span>%s<input type="search" placeholder="Find a tag in this block…">'
+            '<a data-a="fold">Fold all</a><a data-a="open">Unfold all</a><span class="nmsg"></span></div></div>' % (
+                i, len(secs), jump, flt))
+
+
+NETS_JS = """<script>
+// Networks: click a title line to fold / unfold it. Blocks with many changed networks get a toolbar:
+// go to a network, show only one kind of change, find a tag, fold or unfold all.
+(function(){
+  const norm = s => s.toLowerCase().replace(/["#]/g, '');
+  const nets = t => [...document.querySelectorAll('section.net[id^="' + t.dataset.f + 'n"]')];
+  function apply(t){
+    const on = [...t.querySelectorAll('button[data-k].on')].map(b => b.dataset.k), q = norm(t.querySelector('input').value.trim());
+    let n = 0; const all = nets(t);
+    all.forEach(s => { const ok = (!on.length || s.dataset.k.split(' ').some(k => on.includes(k))) &&
+                                  (!q || norm(s.textContent).includes(q));
+      s.classList.toggle('nhide', !ok); if (ok) n++;
+      const a = t.querySelector('a[data-n="' + s.id + '"]'); if (a) a.classList.toggle('off', !ok); });
+    t.querySelector('.nmsg').textContent = !(on.length || q) ? '' : n ? 'Showing ' + n + ' of ' + all.length + '.' :
+      'No network matches.';
+  }
+  document.addEventListener('click', e => {
+    const h = e.target.closest('section.net > .nh');
+    if (h && !e.target.closest('a,button')){ h.parentElement.classList.toggle('fold'); return; }
+    const t = e.target.closest('.ntools'); if (!t) return;
+    const b = e.target.closest('button[data-k]');
+    if (b){ b.classList.toggle('on'); apply(t); return; }
+    const a = e.target.closest('a'); if (!a) return;
+    if (a.dataset.a) nets(t).forEach(s => s.classList.toggle('fold', a.dataset.a === 'fold'));
+    if (a.dataset.n){ const s = document.getElementById(a.dataset.n);
+      if (s.classList.contains('nhide')){ t.querySelectorAll('button.on').forEach(x => x.classList.remove('on'));
+        t.querySelector('input').value = ''; apply(t); }
+      s.classList.remove('fold'); s.scrollIntoView({block: 'start'}); }
+  });
+  document.addEventListener('input', e => { const t = e.target.closest('.ntools'); if (t) apply(t); });
+  window.addEventListener('beforeprint', () => document.querySelectorAll('section.net.fold, section.net.nhide')
+    .forEach(s => s.classList.remove('fold', 'nhide')));
+})();
+</script>"""
+
+
 GROUP_JS = """<script>
 function openTo(id){ const el = document.getElementById(id); if (!el) return;
   for (let d = el.closest('details'); d; d = d.parentElement && d.parentElement.closest('details')) d.open = true;
   el.scrollIntoView(); }
-document.querySelectorAll('.toc li a').forEach(a => a.addEventListener('click', e => { e.preventDefault();
+document.querySelectorAll('.toc li a, .sidenav a[data-f]').forEach(a => a.addEventListener('click', e => { e.preventDefault();
   const id = a.getAttribute('href').slice(1); openTo(id); history.replaceState(null, '', '#' + id); }));
 function allGroups(open){ document.querySelectorAll('details.grp').forEach(d => d.open = open); }
 if (location.hash) openTo(location.hash.slice(1));
 window.addEventListener('beforeprint', () => allGroups(true));
+if (window.IntersectionObserver && document.querySelector('.sidenav')){     // mark the file you are looking at
+  const seen = new Map();
+  const io = new IntersectionObserver(es => { es.forEach(e => seen.set(e.target.id, e.isIntersecting ? e.boundingClientRect.top : null));
+    const vis = [...seen].filter(([, t]) => t !== null).sort((a, b) => a[1] - b[1])[0];
+    if (!vis) return;
+    document.querySelectorAll('.sidenav a.on').forEach(a => a.classList.remove('on'));
+    const a = document.querySelector('.sidenav a[data-f="' + vis[0] + '"]');
+    if (a){ a.classList.add('on'); const sn = a.closest('.sidenav'), r = a.getBoundingClientRect(), b = sn.getBoundingClientRect();
+      if (r.top < b.top || r.bottom > b.bottom) a.scrollIntoView({block: 'nearest'}); } }, {rootMargin: '0px 0px -60% 0px'});
+  document.querySelectorAll('article.file').forEach(f => io.observe(f));
+}
+</script>"""
+
+
+ZOOM_JS = """<script>
+// Big drawings start zoomed out so the whole network / step chain is visible with its changes highlighted.
+// Click a place (or a numbered change) to see it at full size; "Whole drawing" zooms out again.
+(function(){
+  const MARK = new Set(['#16a34a', '#dc2626', '#d97706']);
+  function setup(w){
+    const svg = w.querySelector(':scope > svg'); if (!svg || w.dataset.z) return;
+    w.dataset.z = '1';
+    const W = +svg.getAttribute('width'), H = +svg.getAttribute('height'), avail = w.clientWidth - 14;
+    if (!W || !avail || (W <= avail && H <= 720)) return;
+    const s = Math.min(avail / W, 640 / H, 1);
+    if (s > 0.92) return;
+    const pos = el => { const a = el.getBoundingClientRect(), b = svg.getBoundingClientRect(), k = W / b.width;
+      return [(a.left - b.left + a.width / 2) * k, (a.top - b.top + a.height / 2) * k]; };
+    const marks = [...svg.querySelectorAll('rect')].filter(r => MARK.has((r.getAttribute('stroke') || '').toLowerCase()) &&
+      (+r.getAttribute('width')) * (+r.getAttribute('height')) < 0.5 * W * H)
+      .map(r => [r, pos(r)]).sort((a, b) => a[1][1] - b[1][1] || a[1][0] - b[1][0]).map(x => x[0]);   // top to bottom
+    const bar = document.createElement('div'); bar.className = 'ztools';
+    const gv = w.closest('.gwhole'), few = !gv && marks.length && marks.length <= 15;
+    bar.innerHTML = '<button class="zb" data-a="fit">Whole drawing</button><button class="zb" data-a="full">Full size</button>' +
+      (few ? '<span>Go to change:</span>' + marks.map((m, i) => '<button class="zc" data-i="' + i + '">' + (i + 1) + '</button>').join('')
+           : marks.length && !gv ? '<span>' + marks.length + ' highlighted parts.</span>' : '') +
+      '<span class="zh">' + (gv ? 'Click anywhere else on the drawing to zoom in there.' : 'Click the drawing to zoom in there.') + '</span>';
+    w.before(bar);
+    const fit = () => { w.classList.remove('zfull'); w.classList.add('zfit'); svg.style.width = W * s + 'px'; svg.style.height = H * s + 'px';
+      bar.dataset.m = 'fit'; };
+    const full = (x, y) => { w.classList.remove('zfit'); w.classList.add('zfull'); svg.style.width = W + 'px'; svg.style.height = H + 'px';
+      bar.dataset.m = 'full';
+      if (x !== undefined){ w.scrollLeft = x - w.clientWidth / 2; w.scrollTop = y - w.clientHeight / 2; w.scrollIntoView({block: 'nearest'}); } };
+    w._z = {fit, full, W, H};
+    const peer = () => {                  // before | after side by side: zoom the other drawing to the same place
+      const p = w.parentElement && w.parentElement.closest('.side.pair'); if (!p) return null;
+      const o = [...p.querySelectorAll('.ladwrap')].find(x => x !== w); if (o) setup(o); return o && o._z; };
+    const both = (x, y) => { full(x, y); const q = peer(); if (q) q.full(x / W * q.W, y / H * q.H); };
+    svg.addEventListener('click', e => { if (!w.classList.contains('zfit')) return;
+      const b = svg.getBoundingClientRect(), k = W / b.width; both((e.clientX - b.left) * k, (e.clientY - b.top) * k); });
+    bar.addEventListener('click', e => { const t = e.target.closest('button'); if (!t) return; const q = peer();
+      if (t.dataset.a === 'fit'){ fit(); if (q) q.fit(); } else if (t.dataset.a === 'full'){ full(); if (q) q.full(); }
+      else { const m = marks[+t.dataset.i]; const xy = pos(m); both(xy[0], xy[1]);
+             m.classList.add('zpulse'); setTimeout(() => m.classList.remove('zpulse'), 1600); } });
+    fit();
+  }
+  const go = () => document.querySelectorAll('.ladwrap').forEach(w => { if (w.offsetParent !== null) setup(w); });
+  if (window.IntersectionObserver){
+    const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting){ setup(e.target); io.unobserve(e.target); } }),
+                                        {rootMargin: '300px'});
+    document.querySelectorAll('.ladwrap').forEach(w => io.observe(w));
+  } else go();
+  window.addEventListener('beforeprint', () => document.querySelectorAll('.ladwrap svg').forEach(v => { v.style.width = ''; v.style.height = ''; }));
+})();
+</script>"""
+
+
+GRAPH_JS = """<script>
+// A changed S7-GRAPH: first the whole sequence. A change (a chip, or a marked step / transition in the drawing)
+// opens it before | after: both chains at full size, scrolled to it, with what changed and its changed conditions.
+(function(){
+  const ids = gv => [...gv.querySelectorAll('.gbw button[data-g]')].map(b => b.dataset.g);
+  function natural(svg){ const c = svg.cloneNode(true); c.style.width = c.getAttribute('width') + 'px';
+    c.style.height = c.getAttribute('height') + 'px'; return c; }
+  function show(gv, id){
+    gv.querySelector('.gbw').hidden = gv.querySelector('.gwhole').hidden = !!id;
+    gv.querySelectorAll('.gchg').forEach(p => p.hidden = p.dataset.g !== id);
+    if (!id){ gv.scrollIntoView({block: 'nearest'}); return; }
+    const p = gv.querySelector('.gchg[data-g="' + id + '"]'), list = ids(gv), i = list.indexOf(id);
+    p.querySelector('.gttl').textContent = id + '  ·  change ' + (i + 1) + ' of ' + list.length;
+    p.querySelector('.gprev').disabled = i === 0; p.querySelector('.gnext').disabled = i === list.length - 1;
+    p.querySelectorAll('.gcol').forEach(col => {
+      const box = col.querySelector('.gbox');
+      if (!box.firstChild){
+        const svg = gv.querySelector('.g' + col.dataset.v + ' svg');
+        if (svg && svg.querySelector('rect[data-g="' + id + '"]')) box.appendChild(natural(svg));
+        else { box.classList.add('gnone'); box.textContent = col.dataset.v === 'old' ? id + ' is new - it is not in the old version.'
+                                                                                 : id + ' was removed - it is not in the new version.'; }
+      }
+      const r = box.querySelector('rect[data-g="' + id + '"]');
+      if (r) requestAnimationFrame(() => {
+        box.scrollLeft = +r.getAttribute('x') + r.getAttribute('width') / 2 - box.clientWidth / 2;
+        box.scrollTop = +r.getAttribute('y') + r.getAttribute('height') / 2 - box.clientHeight / 2;
+        r.classList.add('zpulse'); setTimeout(() => r.classList.remove('zpulse'), 1600); });
+    });
+    p.scrollIntoView({block: 'start'});
+  }
+  document.querySelectorAll('.gview').forEach(gv => gv.addEventListener('click', e => {
+    const t = e.target;
+    const svg = t.closest('.gwhole svg');
+    if (svg){                                   // a marked step / transition in the whole drawing
+      const b = svg.getBoundingClientRect(), k = +svg.getAttribute('width') / b.width;
+      const x = (e.clientX - b.left) * k, y = (e.clientY - b.top) * k;
+      const r = [...svg.querySelectorAll('rect[data-g]')].find(r => x >= +r.getAttribute('x') && y >= +r.getAttribute('y') &&
+        x <= +r.getAttribute('x') + +r.getAttribute('width') && y <= +r.getAttribute('y') + +r.getAttribute('height'));
+      if (r){ e.stopPropagation(); show(gv, r.dataset.g); }
+      return;
+    }
+    const b = t.closest('button'); if (!b) return;
+    if (b.dataset.g) show(gv, b.dataset.g);
+    else if (b.dataset.v){ gv.querySelectorAll('.gsw button').forEach(x => x.classList.toggle('on', x === b));
+      gv.querySelector('.gnew').hidden = b.dataset.v !== 'new'; gv.querySelector('.gold').hidden = b.dataset.v !== 'old'; }
+    else if (b.classList.contains('gback')) show(gv, null);
+    else { const list = ids(gv), cur = b.closest('.gchg').dataset.g;
+      show(gv, list[list.indexOf(cur) + (b.classList.contains('gnext') ? 1 : -1)]); }
+  }, true));
+})();
 </script>"""
 
 
@@ -2225,8 +2522,8 @@ def build_block_html(meta, rep):
             h.append(tbl or '<div class="nothing">No members.</div>')
         if rows or doc.kind not in ("data", "udt"):
             h.append('<pre class="code">%s</pre>' % esc("\n".join(rows) or "(nothing to show)"))
-    h.append("</div></article></main><footer>PLC Diff %s · generated %s</footer></body></html>" % (
-        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
+    h.append("</div></article></main><footer>PLC Diff %s · generated %s</footer>%s</body></html>" % (
+        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), ZOOM_JS))
     return "".join(h)
 
 
@@ -2269,8 +2566,9 @@ def _page(title, brand, h1, sub, body):
             '<meta name="viewport" content="width=device-width,initial-scale=1"><title>PLC Diff · %s</title><style>%s</style>'
             '</head><body><header><button class="printbtn" onclick="window.print()">Print / save as PDF</button>'
             '<div class="brand">PLC Diff · %s</div><h1>%s</h1>%s</header><main>%s</main>'
-            '<footer>PLC Diff %s · generated %s</footer></body></html>' % (
-                esc(title), CSS, esc(brand), esc(h1), sub, body, VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M")))
+            '<footer>PLC Diff %s · generated %s</footer>%s</body></html>' % (
+                esc(title), CSS, esc(brand), esc(h1), sub, body, VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                ZOOM_JS))
 
 
 def build_where_html(meta, tag, hits, token):
@@ -2386,9 +2684,11 @@ def build_html(meta, reports, show_all):
         h.append('<nav class="toc">%s<h2>%d file%s changed</h2><ul>' % (
             '<span class="tools"><a onclick="allGroups(true)">Open all</a><a onclick="allGroups(false)">Close all</a></span>'
             if grouped else "", len(reports), "" if len(reports) == 1 else "s"))
+        side = []                                   # the same list, as a sidebar next to the report
         for label, items in groups:
             if grouped:
                 h.append('<li class="tg">%s · %d</li>' % (esc(label), len(items)))
+                side.append('<details open><summary>%s<span>%d</span></summary>' % (esc(label), len(items)))
             for i, r in items:
                 doc = r.doc
                 nm = doc.name if doc else Path(r.path).name
@@ -2400,7 +2700,15 @@ def build_html(meta, reports, show_all):
                     extra = ", ".join(x for x in [extra, "%d other change%s" % (len(r.bullets), "" if len(r.bullets) == 1 else "s")] if x)
                 h.append('<li><a href="#f%d">%s</a>%s<span class="count">%s</span></li>' % (
                     i, esc(nm), ' <span class="sbadge">SAFETY</span>' if r.safety else "", esc(extra)))
+                side.append('<a href="#f%d" data-f="f%d"><b>%s</b>%s<small>%s</small></a>' % (
+                    i, i, esc(nm), ' <span class="sbadge">SAFETY</span>' if r.safety else "", esc(extra)))
+            if grouped:
+                side.append("</details>")
         h.append("</ul></nav>")
+        meta["_side"] = ('<aside class="sidenav"><div class="snh"><b>%d file%s changed</b>%s</div>%s</aside>' % (
+            len(reports), "" if len(reports) == 1 else "s",
+            '<span><a onclick="allGroups(true)">Open all</a> · <a onclick="allGroups(false)">Close all</a></span>' if grouped else "",
+            "".join(side) if grouped else '<div class="snlist">%s</div>' % "".join(side)))
         starts = {items[0][0]: (label, items) for label, items in groups} if grouped else {}
         ends = {items[-1][0] for _, items in groups} if grouped else set()
         for i, r in [x for _, items in groups for x in items]:
@@ -2422,16 +2730,17 @@ def build_html(meta, reports, show_all):
             tbl = html_member_table(r.old.iface if r.old else None, r.new.iface if r.new else None) \
                 if doc and doc.kind in ("data", "udt") and r.bullets and r.status not in ("A", "D") else ""
             h.append(tbl or html_bullets(r.bullets))
-            same = []
+            same, shown = [], []
             for nd in r.nets:
                 if nd.status == "same" and not show_all:
                     same.append(nd.new.idx)
                     continue
                 if nd.status == "same":
-                    h.append("<details><summary>Network %d%s (unchanged)</summary>%s</details>" % (
+                    shown.append("<details><summary>Network %d%s (unchanged)</summary>%s</details>" % (
                         nd.new.idx, " · " + esc(nd.new.title) if nd.new.title else "", html_net(nd, meta)))
                 else:
-                    h.append(html_net(nd, meta))
+                    shown.append(net_with_tools(nd, meta, "f%dn%d" % (i, len(shown))))
+            h.append(net_toolbar(r, i, [x for x in shown if x.startswith("<section")]) + "".join(shown))
             if same and any(n.status != "same" for n in r.nets):
                 h.append('<div class="same-list">%d unchanged network%s hidden (run with --all to show them).</div>' % (
                     len(same), "" if len(same) == 1 else "s"))
@@ -2463,9 +2772,14 @@ def build_html(meta, reports, show_all):
   if (note === null) return; const r = await fetch('/api/review', {method: 'POST', headers: {'X-Token': %s,
   'Content-Type': 'application/json'}, body: JSON.stringify({commit: c, note})}); const j = await r.json().catch(() => ({}));
   if (j.error) return alert(j.error); location.reload(); }</script>""" % json.dumps(meta["token"])) if meta.get("token") else ""
-    h.append("</main><footer>PLC Diff %s · generated %s</footer>%s%s</body></html>" % (
-        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), GROUP_JS if reports else "", review_js))
-    return "".join(h)
+    h.append("</main><footer>PLC Diff %s · generated %s</footer>%s%s%s</body></html>" % (
+        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), GROUP_JS if reports else "", ZOOM_JS + NETS_JS + GRAPH_JS, review_js))
+    page = "".join(h)
+    side = meta.pop("_side", "")
+    if side:
+        page = page.replace("</header><main>", '</header><div class="layout">%s<main>' % side, 1) \
+                   .replace("</main><footer>", "</main></div><footer>", 1)
+    return page
 
 
 # =============================================================================
