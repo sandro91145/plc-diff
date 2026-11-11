@@ -255,6 +255,46 @@ def fbd_fc(new):
                                                                  "<ProgrammingLanguage>FBD</ProgrammingLanguage></AttributeList><ObjectList>")
 
 
+GRA = "http://www.siemens.com/automation/Openness/SW/NetworkSource/Graph/v6"
+
+
+def graph_fb(new):
+    """A small S7-GRAPH sequence: S1 Home -> T1 -> S2 Clamp -> T2 -> S3 Weld -> T3 -> jump to S1.
+    New version: S2 renamed with a longer max time, T2 checks another tag, S3's action changed."""
+    def cond(tag):
+        nb = NB()
+        a, c = nb.glob(tag), nb.part("TrCoil")
+        nb.w(a, (c, "in"))
+        return nb.xml()
+
+    def step(num, name, tmax, action, init=False):
+        return ('<Step Number="%d" Init="%s" Name="%s" MaximumStepTime="%s" WarningTime="T#5S"><Actions>'
+                '<Action Qualifier="N"><Token Text="&quot;%s&quot;" /></Action></Actions></Step>' % (
+                    num, "true" if init else "false", name, tmax, action))
+
+    steps = [step(1, "Home", "T#10S", "Q_Home", True),
+             step(2, "Clamp part" if new else "Clamp", "T#15S" if new else "T#10S", "Q_Clamp"),
+             step(3, "Weld", "T#10S", "Q_WeldOn" if new else "Q_Weld")]
+    trans = [(1, "Start", "I_Start"), (2, "Clamped", "I_ClampedOk" if new else "I_Clamped"), (3, "Welded", "I_WeldDone")]
+    tr = "".join('<Transition IsMissing="false" Name="%s" Number="%d" ProgrammingLanguage="FBD">%s</Transition>' % (
+        n, i, cond(t)) for i, n, t in trans)
+    links = [("StepRef", 1, "TransitionRef", 1, "Direct"), ("TransitionRef", 1, "StepRef", 2, "Direct"),
+             ("StepRef", 2, "TransitionRef", 2, "Direct"), ("TransitionRef", 2, "StepRef", 3, "Direct"),
+             ("StepRef", 3, "TransitionRef", 3, "Direct"), ("TransitionRef", 3, "StepRef", 1, "Jump")]
+    con = "".join('<Connection><NodeFrom><%s Number="%d" /></NodeFrom><NodeTo><%s Number="%d" /></NodeTo>'
+                  '<LinkType>%s</LinkType></Connection>' % x for x in links)
+    graph = ('<Graph xmlns="%s"><Sequence><Steps>%s</Steps><Transitions>%s</Transitions><Branches />'
+             '<Connections>%s</Connections></Sequence></Graph>' % (GRA, "".join(steps), tr, con))
+    unit = ('<SW.Blocks.CompileUnit ID="10" CompositionName="CompileUnits"><AttributeList><NetworkSource>%s</NetworkSource>'
+            '<ProgrammingLanguage>GRAPH</ProgrammingLanguage></AttributeList><ObjectList>%s</ObjectList>'
+            '</SW.Blocks.CompileUnit>' % (graph, ml("Title", "Sequence", "1A")))
+    return ('<?xml version="1.0" encoding="utf-8"?>\n<Document><Engineering version="V20" /><SW.Blocks.FB ID="0"><AttributeList>'
+            '<Interface><Sections xmlns="%s"><Section Name="Input" /><Section Name="Output" /><Section Name="InOut" />'
+            '<Section Name="Static" /><Section Name="Temp" /><Section Name="Constant" /></Sections></Interface>'
+            '<Name>FB_WeldSequence</Name><Number>40</Number><ProgrammingLanguage>GRAPH</ProgrammingLanguage></AttributeList>'
+            '<ObjectList>%s%s</ObjectList></SW.Blocks.FB></Document>' % (IFC, unit, ml("Title", "Weld sequence", "F2")))
+
+
 def db(new):
     """A global DB: a start value, a data type and the order of members change, one member is added."""
     rows = [("Speed", "Int", "1200"), ("Ramp", "Time", "T#2S"), ("Mode", "Byte", ""), ("Count", "DInt", "")]
@@ -292,3 +332,4 @@ if __name__ == "__main__":
     (out / "vci" / "Program blocks" / "Station" / "FC_Alarms.xml").write_text(fbd_fc(new), encoding="utf-8")
     (out / "vci" / "PLC tags" / "Station1_IO.xml").write_text(tags(new), encoding="utf-8")
     (out / "vci" / "Program blocks" / "Station" / "DB_Settings.xml").write_text(db(new), encoding="utf-8")
+    (out / "vci" / "Program blocks" / "Station" / "FB_WeldSequence.xml").write_text(graph_fb(new), encoding="utf-8")

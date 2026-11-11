@@ -145,6 +145,11 @@ def check_html(repo, tmp):
         "every changed network can be folded and filtered (%d networks)" % len(secs))
     say('<div class="ntools"' in h and 'data-k="new"' in h and 'placeholder="Find a tag in this block' in h,
         "a block with 3+ changed networks gets the go-to / show-only / find toolbar")
+    say('<div class="side pair"><div class="col"><div class="cap">Before' in h,
+        "a changed LAD / FBD network is drawn before | after side by side")
+    say('<div class="gview">' in h and all('<div class="gchg" data-g="%s" hidden>' % k in h for k in ("S2", "S3", "T2"))
+        and 'rect data-g="S2"' in h, "a changed S7-GRAPH shows the whole sequence, each change opens before | after")
+    say("transition T2: condition changed" in h, "a transition whose condition is one tag wired straight in is compared")
 
 
 def check_files_mode(repo, tmp):

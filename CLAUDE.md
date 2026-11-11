@@ -50,8 +50,8 @@ very deep — keep paths and drawings robust for that.
 | Documents — `Doc`, `parse_doc` | FC/FB/OB → networks (FlgNet / StructuredText / StatementList / **Graph**), DBs, UDTs, tag tables; interface members; `detect_safety` |
 | Diffing | `compare_nets` (element multiset diff, pairs operand changes, box pin changes → `pins_old/new`), `align_nets` (SequenceMatcher over network fingerprints + title/similarity pairing), `diff_file` → `FileReport` |
 | Drawing | LAD: blocks (`blk_contact/coil/cmp/box`), `series`/`par_block`/`split_block`, `make_trie` (shared prefixes → branches to multiple coils), `net_svg`. FBD: `fbd_boxlike`, `fbd_block`, `net_svg_fbd`. `draw_net` picks LAD/FBD by network language (`FBD`/`F_FBD` → FBD). `tmid()` shortens long tag names in the middle so the end stays visible |
-| S7-GRAPH | `parse_graph_sequence`, `graph_summary`, `graph_links` (structure with branches resolved), `compare_graph`, `graph_svg` (layered layout: rank = longest path, column by DFS; branch bars; jumps as ↓S#), `html_graph_net` (chain before/after + changed conditions drawn as FBD) |
-| Report | `print_report` (terminal), `build_html` (compare page: TOC, SAFETY badges, safety bar, networks before/after, "Logic as text", sign-off sheet, print CSS / "Print / save as PDF"), `build_block_html` (one block in one version, every network drawn - `/view/block`), `build_where_html` (`where_used`: every network / DB / tag table using a tag, highlighted), `build_blockhistory_html` (`block_history`: `git log --follow` of one export), `html_member_table` (DB/UDT before/after table), `compare_folders` (two folders, no Git - `/view/folders`, `--folders`); the compare page has a sticky **sidebar** (`.sidenav`, same groups, marks the file in view; on screens under 960 px the top table of contents is used instead) and `ZOOM_JS` (drawings wider than the page or taller than 720 px start zoomed out with the changes highlighted; click a place or a numbered change to see it at full size); every changed network gets an id + `data-k` kinds (`net_with_tools`; click its title line to fold it) and a block with 3+ changed networks gets `net_toolbar` (go to a network, show only new / removed networks or parts added / removed / changed, find a tag, fold all; `NETS_JS`, printing unfolds everything); `report_groups` puts the changed files in collapsible sections per TIA folder (Program blocks, PLC tags, PLC data types… - closed when more than 8 files; the table of contents opens the right one, printing opens all) |
+| S7-GRAPH | `parse_graph_sequence`, `graph_summary`, `graph_links` (structure with branches resolved), `compare_graph`, `graph_svg` (layered layout: rank = longest path, column by DFS; branch bars; jumps as ↓S#), `html_graph_net` (added / removed / unchanged: the chain; changed → `html_graph_change`: the whole sequence first (After / Before switch), each change (`rect data-g="S2"`, chips) opens a panel with its notes, its changed conditions before | after and both chains at full size scrolled to it - built by `GRAPH_JS`; printing shows both chains and every panel) |
+| Report | `print_report` (terminal), `build_html` (compare page: TOC, SAFETY badges, safety bar, networks before/after, "Logic as text", sign-off sheet, print CSS / "Print / save as PDF"), `build_block_html` (one block in one version, every network drawn - `/view/block`), `build_where_html` (`where_used`: every network / DB / tag table using a tag, highlighted), `build_blockhistory_html` (`block_history`: `git log --follow` of one export), `html_member_table` (DB/UDT before/after table), `compare_folders` (two folders, no Git - `/view/folders`, `--folders`); the compare page has a sticky **sidebar** (`.sidenav`, same groups, marks the file in view; on screens under 960 px the top table of contents is used instead) and `ZOOM_JS` (drawings wider than the page or taller than 720 px start zoomed out with the changes highlighted; click a place or a numbered change to see it at full size; in a before | after pair (`.side.pair`, changed LAD/FBD networks and GRAPH conditions) zooming one side zooms the other to the same spot); every changed network gets an id + `data-k` kinds (`net_with_tools`; click its title line to fold it) and a block with 3+ changed networks gets `net_toolbar` (go to a network, show only new / removed networks or parts added / removed / changed, find a tag, fold all; `NETS_JS`, printing unfolds everything); `report_groups` puts the changed files in collapsible sections per TIA folder (Program blocks, PLC tags, PLC data types… - closed when more than 8 files; the table of contents opens the right one, printing opens all) |
 | Git | `git()`, `rev_ok`, `rev_desc`, `changed_files` (rename limit raised; **pure moves R100 skipped**, counted in `moves`), `read_rev` (WORK = files on disk); `blocks_at` (exports that existed in a version), `restore_block` (write one
 export back into the workspace, or a copy elsewhere), `workspace_path` (where an export from an older version belongs in today's PLC folder), `export_place` (PLC, TIA folder and sub-folder of an export, for grouped lists); `NOWIN` hides console windows on Windows; `ensure_git_on_path` |
 | PLCs | `plcdiff.json` (`plcs: [{name, path, was?}]`), `plc_map`, `plc_prefixes` (current + earlier folders so history survives a move; inferred for exports that used to sit directly in `vci/`), `list_plcs`, `plc_of`, `plc_paths` (adds `:(exclude)` for nested PLC folders) |
@@ -79,6 +79,8 @@ compare to some files (a block's history).
   in, negation per input pin. Calls: `<Call><CallInfo Name BlockType><Instance/><Parameter Name Section Type/>`;
   negated call inputs appear as `<Negated Name="<pin>"/>` on the Call. FBD `"A" = "B"`: an `IdentCon` wired
   straight into a coil's `in` pin (no gate) - very common (500+ coils in one real project); `_direct_op` reads it.
+  The same happens in S7-GRAPH transitions / supervisions / interlocks (`TrCoil` fed straight by one tag: 47 of 713
+  transitions in one real project); `cond_text` reads it too.
 - **S7-GRAPH** (FB, language GRAPH): `NetworkSource/Graph` with `PreOperations/PermanentOperation*` (FlgNet),
   `Sequence` → `Steps/Step(Number, Init, Name, MaximumStepTime, WarningTime)` with `Actions/Action(Qualifier,
   Event?)` of `Token`s, `Supervisions/Supervision` and `Interlocks/Interlock` (FlgNet ending in `SvCoil`/`IlCoil`);
@@ -131,6 +133,8 @@ compare to some files (a block's history).
   that section name out (block interfaces keep `Input.`, `Static.` …).
 - FBD coils fed straight by a tag were read as `:= TRUE` and drawn with nothing in front, so a change of that tag
   was missed → `chain_of` / `fbd_tree` / `fbd_roots` use `_direct_op`. The samples have such a network now.
+- GRAPH transitions with one tag wired straight into `TrCoil` showed "(no condition)" and a change of that tag was
+  missed → `cond_text` uses `_direct_op`. The sample GRAPH block (`FB_WeldSequence`) has such transitions.
 - A changed **order** is a real change: DB/UDT members (memory layout) → `order_diff`; networks of a block
   (execution order) → "network order changed". Only then may `export_lines` call the rest "renumbered".
 - An iframe with a `srcdoc` hint ignores a later `src` → `loadFrame` removes `srcdoc` first.
@@ -139,7 +143,7 @@ compare to some files (a block's history).
 
 ## 8. How we test
 
-- **`python tests/smoke.py` runs the whole checklist below in one go** (82 checks, ~30 s): both files compile,
+- **`python tests/smoke.py` runs the whole checklist below in one go** (85 checks, ~30 s): both files compile,
   a throwaway Git repo is built from the samples, the compare finds every kind of change (tag, interface, contact,
   box pin, call parameter, negated input, added/removed network), the HTML page really contains drawings and print
   CSS, `--files` / `--work` / `--history` work, the CSV has the BOM and `;` Excel needs, and the app itself starts,
@@ -147,7 +151,8 @@ compare to some files (a block's history).
   It never writes in a real project (temp folder, its own `APPDATA`) and never changes `PLCDiff.pyw`.
   `--keep` leaves the throwaway repo for poking at by hand; `--no-app` skips the server part.
 - `make_samples.py <dir> old|new` writes realistic V20 exports (LAD with branches/TON/FB call/compare, FBD with
-  gates and a negated call input, tag table) for two versions; build a throwaway git repo with them.
+  gates and a negated call input, tag table, a global DB, a small S7-GRAPH sequence) for two versions; build a
+  throwaway git repo with them.
 - S7-GRAPH: export a real GRAPH FB, edit a copy (rename a step, change a time/action/condition/jump) and run
   `--files old.xml new.xml`.
 - Team flow tested with a bare repo + two app instances (different `APPDATA`, ports): concurrent pushes, conflict,

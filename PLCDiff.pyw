@@ -1634,7 +1634,8 @@ def cond_net(el, title):
 def cond_text(n):
     for p in n.parts.values():
         if p.name in GRAPH_COIL_NAMES:
-            return n.expr_text(n._pred(p))
+            d = None if n.main_in.get(p.uid) else n._direct_op(p)     # a single tag wired straight into the coil
+            return ("NOT " if d["neg"] else "") + d["text"] if d else n.expr_text(n._pred(p))
     return " ; ".join(n.statements)
 
 
@@ -1885,8 +1886,8 @@ def graph_svg(g, marks):
         mark = marks.get(sid)
         if mark:
             stc, fill = HL[mark]
-            s.append('<rect x="%.1f" y="%.1f" width="%d" height="%d" rx="6" fill="%s" stroke="%s" stroke-width="1.5"/>' % (
-                x - STEP_W / 2 - 5, t - 5, STEP_W + 10, STEP_H + 10, fill, stc))
+            s.append('<rect data-g="%s" x="%.1f" y="%.1f" width="%d" height="%d" rx="6" fill="%s" stroke="%s" stroke-width="1.5"/>' % (
+                sid, x - STEP_W / 2 - 5, t - 5, STEP_W + 10, STEP_H + 10, fill, stc))
         s.append('<rect class="w box" x="%.1f" y="%.1f" width="%d" height="%d" rx="2"/>' % (x - STEP_W / 2, t, STEP_W, STEP_H))
         if st["init"]:
             s.append('<rect class="w" x="%.1f" y="%.1f" width="%d" height="%d" rx="1"/>' % (
@@ -1913,8 +1914,8 @@ def graph_svg(g, marks):
         tw_ = min(max(tw(trunc(lab, 36)) * 1.05, tw(trunc(cond, 40))) + 34, COLW - STEP_W / 2 - 12)
         if mark:
             stc, fill = HL[mark]
-            s.append('<rect x="%.1f" y="%.1f" width="%.1f" height="%d" rx="6" fill="%s" stroke="%s" stroke-width="1.5"/>' % (
-                x - 18, t + 1, tw_, TR_H - 2, fill, stc))
+            s.append('<rect data-g="%s" x="%.1f" y="%.1f" width="%.1f" height="%d" rx="6" fill="%s" stroke="%s" stroke-width="1.5"/>' % (
+                tid, x - 18, t + 1, tw_, TR_H - 2, fill, stc))
         if not any(a == tid for a, *_ in g["edges"]) and not jumps.get(tid):
             pass
         s.append('<path class="w" d="M%.1f %.1f V%.1f" />' % (x, t, t + TR_H))
@@ -1929,8 +1930,48 @@ def graph_svg(g, marks):
             % (W, H, W, H, "".join(s)))
 
 
+def html_graph_change(nd, meta):
+    """A changed S7-GRAPH: first the whole sequence; a click on a change shows that step / transition
+    before | after, with what changed and its changed conditions (GRAPH_JS builds the before | after view)."""
+    view = meta.get("view", "auto")
+    ids = sorted(set(nd.marks_old) | set(nd.marks_new), key=lambda k: (k[0] != "S", natkey(k)))
+    chips = "".join('<button data-g="%s" class="%s">%s</button>' % (
+        k, nd.marks_new.get(k) or nd.marks_old.get(k), k) for k in ids)
+    h = ['<div class="gview"><div class="gbar gbw"><span class="gsw"><button data-v="new" class="on">After</button>'
+         '<button data-v="old">Before</button></span><span>%d change%s:</span>%s'
+         '<span class="zh">Click a marked step or transition to see it before | after.</span></div>' % (
+             len(ids), "" if len(ids) == 1 else "s", chips)]
+    h.append('<div class="gwhole"><div class="gw gnew"><div class="cap">Whole sequence after · <code>%s</code></div>'
+             '<div class="ladwrap">%s</div></div><div class="gw gold" hidden><div class="cap">Whole sequence before · '
+             '<code>%s</code></div><div class="ladwrap">%s</div></div></div>' % (
+                 esc(meta["new_short"]), graph_svg(nd.new.graph, nd.marks_new),
+                 esc(meta["old_short"]), graph_svg(nd.old.graph, nd.marks_old)))
+    for k in ids:
+        word = re.compile(r"(?<![\w])%s(?![\w])" % re.escape(k))
+        notes = [b for b in nd.bullets if word.search(b[1])]
+        dets = [(label, cd) for label, cd in getattr(nd, "details", []) or [] if label.split(" ", 1)[0] == k]
+        h.append('<div class="gchg" data-g="%s" hidden><div class="gbar"><button class="gback">← Whole sequence</button>'
+                 '<button class="gprev">‹ Previous</button><button class="gnext">Next ›</button><b class="gttl">%s</b></div>%s' % (
+                     k, esc(k), html_bullets(notes)))
+        for label, cd in dets:                  # a changed condition / supervision / interlock first
+            h.append('<div class="gdet"><div class="gdh">%s</div><div class="side pair"><div class="col"><div class="cap">'
+                     'Before</div><div class="ladwrap">%s</div></div><div class="col"><div class="cap">After</div>'
+                     '<div class="ladwrap">%s</div></div></div></div>' % (
+                         esc(label), draw_net(cd.old, cd.marks_old, cd.pins_old, view),
+                         draw_net(cd.new, cd.marks_new, cd.pins_new, view)))
+        h.append('%s<div class="gpair%s"><div class="gcol" data-v="old"><div class="cap">Before · <code>%s</code></div>'
+                 '<div class="gbox"></div></div><div class="gcol" data-v="new"><div class="cap">After · <code>%s</code></div>'
+                 '<div class="gbox"></div></div></div></div>' % (
+                     '<div class="gdh gwhere">Where it is in the sequence</div>' if dets else "", " small" if dets else "",
+                     esc(meta["old_short"]), esc(meta["new_short"])))
+    h.append("</div>")
+    return "".join(h)
+
+
 def html_graph_net(nd, meta):
     view = meta.get("view", "auto")
+    if nd.status == "changed" and nd.old is not None and nd.new is not None and (nd.marks_old or nd.marks_new):
+        return html_graph_change(nd, meta)
     h = ['<div class="side">']
     if nd.old is not None and nd.status != "same":
         h.append('<div class="cap">Before · <code>%s</code></div><div class="ladwrap">%s</div>' % (
@@ -2053,6 +2094,21 @@ border:1px solid var(--line);background:#fff;color:var(--ink);margin:1px}
 .ntools button span{color:var(--muted);font-weight:400}.ntools button.on{background:var(--ink);color:#fff;border-color:var(--ink)}.ntools button.on span{color:#cbd5e1}
 .ntools input{font:12px "Segoe UI",sans-serif;border:1px solid var(--line);border-radius:6px;padding:4px 8px;width:200px;margin-left:6px}
 .ntools a[data-a]{color:var(--accent);cursor:pointer;font-weight:600;margin-left:8px}.ntools .nmsg{margin-left:8px;color:var(--ink)}
+.side.pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px;align-items:start}
+@media (max-width:1100px){.side.pair{display:block}}
+.gbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:8px 0 6px;font-size:12px;color:var(--muted)}
+.gbar button{font:600 12px "Segoe UI",sans-serif;border:1px solid var(--line);background:#fff;border-radius:6px;padding:3px 9px;cursor:pointer;color:var(--ink)}
+.gbar button.chg{background:var(--chgbg);border-color:#fcd34d}.gbar button.add{background:var(--addbg);border-color:#86efac}
+.gbar button.del{background:var(--delbg);border-color:#fca5a5}.gbar button:disabled{opacity:.35;cursor:default}
+.gsw{display:inline-flex;margin-right:8px}.gsw button{border-radius:0}.gsw button:first-child{border-radius:6px 0 0 6px}
+.gsw button:last-child{border-radius:0 6px 6px 0;margin-left:-1px}.gsw button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.gbar .gback{background:var(--ink);color:#fff;border-color:var(--ink)}.gbar .gttl{color:var(--ink);font-size:14px;margin-left:8px}
+.gchg{scroll-margin-top:100px}.gview .gbar[hidden]{display:none}.gpair.small .gbox{height:42vh}
+.gwhere{margin-top:14px;border-top:1px dashed var(--line);padding-top:10px}
+.gpair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+.gbox{height:60vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px}
+.gbox.gnone{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;padding:20px;text-align:center}
+.gchg ul.b{margin-top:12px}
 .nochange{background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;border-radius:8px;padding:10px 14px;margin:4px 0 10px;font-size:13px}
 .toc .tg{list-style:none;margin:8px 0 2px -18px;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
 .toc .tools{float:right;font-size:12px}.toc .tools a{color:var(--accent);margin-left:12px;cursor:pointer}
@@ -2122,7 +2178,8 @@ display:flex;flex-direction:column;gap:2px}.safetybar small{color:#991b1b}
   body{background:#fff}header{background:#fff;color:#0f172a;border-bottom:2px solid #0f172a;padding:10px 0}
   header h1{color:#0f172a}.rev{background:#fff;border-color:#cbd5e1;color:#0f172a}.rev code{color:#0f172a}
   .commits{color:#334155}.commits code{color:#0f172a}.brand{color:#0e7490}
-  .printbtn,.legend span:last-child,details summary,.toc .tools,.sidenav,.ztools,.ntools,.nh .nfold{display:none}
+  .printbtn,.legend span:last-child,details summary,.toc .tools,.sidenav,.ztools,.ntools,.nh .nfold,.gbar,.gpair{display:none}
+  .side.pair{display:block}.gview .gwhole[hidden],.gview .gw[hidden],.gview .gchg[hidden]{display:block!important}
   .layout{display:block}.layout .toc{display:block}.ladwrap.zfull{max-height:none}
   details.grp>summary{display:flex;border:0;border-bottom:2px solid #0f172a;border-radius:0;padding:6px 0}details.grp>summary:before{content:""}
   main{padding:10px 0;max-width:none}.ladwrap{overflow:visible;border:0;padding:0}svg.lad{max-width:100%;height:auto}
@@ -2179,14 +2236,17 @@ def html_net(nd, meta):
             h.append(html_codediff(lines))
         h.append("</section>")
         return "".join(h)
-    h.append('<div class="side">')
+    pair = st == "changed" and nd.old is not None and nd.new is not None
+    h.append('<div class="side pair">' if pair else '<div class="side">')
     if nd.old is not None and st != "same":
-        h.append('<div class="cap">Before · <code>%s</code></div><div class="ladwrap">%s</div>' % (
-            esc(meta["old_short"]), draw_net(nd.old, nd.marks_old, nd.pins_old, meta.get("view", "auto"))))
+        h.append('%s<div class="cap">Before · <code>%s</code></div><div class="ladwrap">%s</div>%s' % (
+            '<div class="col">' if pair else "", esc(meta["old_short"]),
+            draw_net(nd.old, nd.marks_old, nd.pins_old, meta.get("view", "auto")), "</div>" if pair else ""))
     if nd.new is not None:
         cap = "After" if st != "same" else "Network"
-        h.append('<div class="cap">%s · <code>%s</code></div><div class="ladwrap">%s</div>' % (
-            cap, esc(meta["new_short"]), draw_net(nd.new, nd.marks_new, nd.pins_new, meta.get("view", "auto"))))
+        h.append('%s<div class="cap">%s · <code>%s</code></div><div class="ladwrap">%s</div>%s' % (
+            '<div class="col">' if pair else "", cap, esc(meta["new_short"]),
+            draw_net(nd.new, nd.marks_new, nd.pins_new, meta.get("view", "auto")), "</div>" if pair else ""))
     h.append("</div>")
     if st != "same":
         a = nd.old.statements if nd.old else []
@@ -2340,22 +2400,27 @@ ZOOM_JS = """<script>
       (+r.getAttribute('width')) * (+r.getAttribute('height')) < 0.5 * W * H)
       .map(r => [r, pos(r)]).sort((a, b) => a[1][1] - b[1][1] || a[1][0] - b[1][0]).map(x => x[0]);   // top to bottom
     const bar = document.createElement('div'); bar.className = 'ztools';
-    const few = marks.length && marks.length <= 15;
+    const gv = w.closest('.gwhole'), few = !gv && marks.length && marks.length <= 15;
     bar.innerHTML = '<button class="zb" data-a="fit">Whole drawing</button><button class="zb" data-a="full">Full size</button>' +
       (few ? '<span>Go to change:</span>' + marks.map((m, i) => '<button class="zc" data-i="' + i + '">' + (i + 1) + '</button>').join('')
-           : marks.length ? '<span>' + marks.length + ' highlighted parts.</span>' : '') +
-      '<span class="zh">Click the drawing to zoom in there.</span>';
+           : marks.length && !gv ? '<span>' + marks.length + ' highlighted parts.</span>' : '') +
+      '<span class="zh">' + (gv ? 'Click anywhere else on the drawing to zoom in there.' : 'Click the drawing to zoom in there.') + '</span>';
     w.before(bar);
     const fit = () => { w.classList.remove('zfull'); w.classList.add('zfit'); svg.style.width = W * s + 'px'; svg.style.height = H * s + 'px';
       bar.dataset.m = 'fit'; };
     const full = (x, y) => { w.classList.remove('zfit'); w.classList.add('zfull'); svg.style.width = W + 'px'; svg.style.height = H + 'px';
       bar.dataset.m = 'full';
       if (x !== undefined){ w.scrollLeft = x - w.clientWidth / 2; w.scrollTop = y - w.clientHeight / 2; w.scrollIntoView({block: 'nearest'}); } };
+    w._z = {fit, full, W, H};
+    const peer = () => {                  // before | after side by side: zoom the other drawing to the same place
+      const p = w.parentElement && w.parentElement.closest('.side.pair'); if (!p) return null;
+      const o = [...p.querySelectorAll('.ladwrap')].find(x => x !== w); if (o) setup(o); return o && o._z; };
+    const both = (x, y) => { full(x, y); const q = peer(); if (q) q.full(x / W * q.W, y / H * q.H); };
     svg.addEventListener('click', e => { if (!w.classList.contains('zfit')) return;
-      const b = svg.getBoundingClientRect(), k = W / b.width; full((e.clientX - b.left) * k, (e.clientY - b.top) * k); });
-    bar.addEventListener('click', e => { const t = e.target.closest('button'); if (!t) return;
-      if (t.dataset.a === 'fit') fit(); else if (t.dataset.a === 'full') full();
-      else { const m = marks[+t.dataset.i]; const xy = pos(m); full(xy[0], xy[1]);
+      const b = svg.getBoundingClientRect(), k = W / b.width; both((e.clientX - b.left) * k, (e.clientY - b.top) * k); });
+    bar.addEventListener('click', e => { const t = e.target.closest('button'); if (!t) return; const q = peer();
+      if (t.dataset.a === 'fit'){ fit(); if (q) q.fit(); } else if (t.dataset.a === 'full'){ full(); if (q) q.full(); }
+      else { const m = marks[+t.dataset.i]; const xy = pos(m); both(xy[0], xy[1]);
              m.classList.add('zpulse'); setTimeout(() => m.classList.remove('zpulse'), 1600); } });
     fit();
   }
@@ -2366,6 +2431,59 @@ ZOOM_JS = """<script>
     document.querySelectorAll('.ladwrap').forEach(w => io.observe(w));
   } else go();
   window.addEventListener('beforeprint', () => document.querySelectorAll('.ladwrap svg').forEach(v => { v.style.width = ''; v.style.height = ''; }));
+})();
+</script>"""
+
+
+GRAPH_JS = """<script>
+// A changed S7-GRAPH: first the whole sequence. A change (a chip, or a marked step / transition in the drawing)
+// opens it before | after: both chains at full size, scrolled to it, with what changed and its changed conditions.
+(function(){
+  const ids = gv => [...gv.querySelectorAll('.gbw button[data-g]')].map(b => b.dataset.g);
+  function natural(svg){ const c = svg.cloneNode(true); c.style.width = c.getAttribute('width') + 'px';
+    c.style.height = c.getAttribute('height') + 'px'; return c; }
+  function show(gv, id){
+    gv.querySelector('.gbw').hidden = gv.querySelector('.gwhole').hidden = !!id;
+    gv.querySelectorAll('.gchg').forEach(p => p.hidden = p.dataset.g !== id);
+    if (!id){ gv.scrollIntoView({block: 'nearest'}); return; }
+    const p = gv.querySelector('.gchg[data-g="' + id + '"]'), list = ids(gv), i = list.indexOf(id);
+    p.querySelector('.gttl').textContent = id + '  ·  change ' + (i + 1) + ' of ' + list.length;
+    p.querySelector('.gprev').disabled = i === 0; p.querySelector('.gnext').disabled = i === list.length - 1;
+    p.querySelectorAll('.gcol').forEach(col => {
+      const box = col.querySelector('.gbox');
+      if (!box.firstChild){
+        const svg = gv.querySelector('.g' + col.dataset.v + ' svg');
+        if (svg && svg.querySelector('rect[data-g="' + id + '"]')) box.appendChild(natural(svg));
+        else { box.classList.add('gnone'); box.textContent = col.dataset.v === 'old' ? id + ' is new - it is not in the old version.'
+                                                                                 : id + ' was removed - it is not in the new version.'; }
+      }
+      const r = box.querySelector('rect[data-g="' + id + '"]');
+      if (r) requestAnimationFrame(() => {
+        box.scrollLeft = +r.getAttribute('x') + r.getAttribute('width') / 2 - box.clientWidth / 2;
+        box.scrollTop = +r.getAttribute('y') + r.getAttribute('height') / 2 - box.clientHeight / 2;
+        r.classList.add('zpulse'); setTimeout(() => r.classList.remove('zpulse'), 1600); });
+    });
+    p.scrollIntoView({block: 'start'});
+  }
+  document.querySelectorAll('.gview').forEach(gv => gv.addEventListener('click', e => {
+    const t = e.target;
+    const svg = t.closest('.gwhole svg');
+    if (svg){                                   // a marked step / transition in the whole drawing
+      const b = svg.getBoundingClientRect(), k = +svg.getAttribute('width') / b.width;
+      const x = (e.clientX - b.left) * k, y = (e.clientY - b.top) * k;
+      const r = [...svg.querySelectorAll('rect[data-g]')].find(r => x >= +r.getAttribute('x') && y >= +r.getAttribute('y') &&
+        x <= +r.getAttribute('x') + +r.getAttribute('width') && y <= +r.getAttribute('y') + +r.getAttribute('height'));
+      if (r){ e.stopPropagation(); show(gv, r.dataset.g); }
+      return;
+    }
+    const b = t.closest('button'); if (!b) return;
+    if (b.dataset.g) show(gv, b.dataset.g);
+    else if (b.dataset.v){ gv.querySelectorAll('.gsw button').forEach(x => x.classList.toggle('on', x === b));
+      gv.querySelector('.gnew').hidden = b.dataset.v !== 'new'; gv.querySelector('.gold').hidden = b.dataset.v !== 'old'; }
+    else if (b.classList.contains('gback')) show(gv, null);
+    else { const list = ids(gv), cur = b.closest('.gchg').dataset.g;
+      show(gv, list[list.indexOf(cur) + (b.classList.contains('gnext') ? 1 : -1)]); }
+  }, true));
 })();
 </script>"""
 
@@ -2652,7 +2770,7 @@ def build_html(meta, reports, show_all):
   'Content-Type': 'application/json'}, body: JSON.stringify({commit: c, note})}); const j = await r.json().catch(() => ({}));
   if (j.error) return alert(j.error); location.reload(); }</script>""" % json.dumps(meta["token"])) if meta.get("token") else ""
     h.append("</main><footer>PLC Diff %s · generated %s</footer>%s%s%s</body></html>" % (
-        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), GROUP_JS if reports else "", ZOOM_JS + NETS_JS, review_js))
+        VERSION, datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), GROUP_JS if reports else "", ZOOM_JS + NETS_JS + GRAPH_JS, review_js))
     page = "".join(h)
     side = meta.pop("_side", "")
     if side:
