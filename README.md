@@ -24,8 +24,8 @@ It runs on your own PC, opens in your browser, and needs nothing but Python and 
 ### Compare versions
 
 - **Any two versions** — two commits, or your fresh export against the last commit.
-- **Drawn like in TIA** — LAD as ladder, FBD as FBD, SCL/STL as a text diff. Before and after are side by side;
-  tag names are always shown in full.
+- **Drawn like in TIA** — LAD as ladder, FBD as FBD, SCL/STL as text. Before and after are side by side (SCL line by
+  line, with the changed characters marked); tag names are always shown in full.
 - **S7-GRAPH sequences** — steps, transitions, branches, jumps, supervisions and interlocks. You first see the whole
   sequence with the changes marked; click a step or transition to see that change before and after, with its
   condition drawn as FBD and where it sits in the chain.
@@ -34,7 +34,8 @@ It runs on your own PC, opens in your browser, and needs nothing but Python and 
   types…) and listed in a sidebar. Big drawings start zoomed out with the changes highlighted; click a change to
   zoom in there. A block with many changed networks gets a toolbar: go to a network, show only one kind of change,
   find a tag, fold networks away.
-- **No false alarms** — a block TIA only renumbered after a compile says "no logic change".
+- **No false alarms** — a block TIA only renumbered after a compile says "no logic change", and a network that
+  only moved to another position is listed as moved, not as removed and added.
 - **Compare two folders** — no Git needed: e.g. the customer's export against yours, or a backup from site.
 
 ### Look up and look back

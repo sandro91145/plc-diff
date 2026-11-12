@@ -150,6 +150,8 @@ def check_html(repo, tmp):
     say('<div class="gview">' in h and all('<div class="gchg" data-g="%s" hidden>' % k in h for k in ("S2", "S3", "T2"))
         and 'rect data-g="S2"' in h, "a changed S7-GRAPH shows the whole sequence, each change opens before | after")
     say("transition T2: condition changed" in h, "a transition whose condition is one tag wired straight in is compared")
+    say('<table class="tpair">' in h and "<mark>2</mark>" in h and "unchanged lines" in h,
+        "a changed SCL network is shown before | after side by side, changed characters marked")
     import importlib.machinery as _ilm, importlib.util as _ilu
     _ld = _ilm.SourceFileLoader("pdm", str(APP)); _sp = _ilu.spec_from_loader("pdm", _ld); _pd = _ilu.module_from_spec(_sp); _ld.exec_module(_pd)
     _long = '"FGDB_010XYZ003-QM1@AddOn".AddS.Belegt_Type_C_with_a_long_tail'
@@ -188,6 +190,18 @@ def check_history(repo, tmp):
     code, out = app("--history", "--csv", csv, "--no-open", cwd=repo)
     say(code == 0, "--history runs", out.strip()[-400:])
     say((repo / ".plcdiff" / "changes.db").exists(), "database written")
+    import sqlite3
+    con = sqlite3.connect(str(repo / ".plcdiff" / "changes.db"))
+    n = con.execute("SELECT COUNT(*) FROM changes").fetchone()[0]
+    con.execute("UPDATE meta SET value = 'old' WHERE key = 'format'")         # made by an older PLC Diff
+    con.execute("INSERT INTO changes (commit_hash, change) SELECT hash, 'stale row' FROM commits LIMIT 1")
+    con.commit(); con.close()
+    app("--history", "--no-open", cwd=repo)
+    con = sqlite3.connect(str(repo / ".plcdiff" / "changes.db"))
+    say(con.execute("SELECT COUNT(*) FROM changes").fetchone()[0] == n and
+        not con.execute("SELECT 1 FROM changes WHERE change = 'stale row'").fetchone(),
+        "history made by an older PLC Diff is read again")
+    con.close()
     page = repo / ".plcdiff" / "history.html"
     if page.exists():
         h = page.read_text(encoding="utf-8")
@@ -420,6 +434,17 @@ def check_rewritten(tmp):
                                 encoding="utf-8")
     code, out = app("--files", src, d / "attr.xml", "--text", "--no-open")
     say("nothing the drawing shows changed" in out, "a change outside the drawing is still reported", out[-300:])
+    units = re.findall(r"<SW\.Blocks\.CompileUnit .*?</SW\.Blocks\.CompileUnit>", text, re.S)
+    moved = text.replace("".join(units), "".join(units[1:] + units[:1]))        # first network moved to the end
+    (d / "moved.xml").write_text(moved, encoding="utf-8")
+    code, out = app("--files", src, d / "moved.xml", "--text", "--no-open")
+    say(len(units) >= 3 and "networks only moved" in out and "network added" not in out and "network removed" not in out,
+        "a network that only moved is not a change ('no logic change - networks only moved')", out[-300:])
+    moved2 = moved.replace("I_ReadyOk" if "I_ReadyOk" in moved else "I_Ready", "I_ReadyX")
+    (d / "moved2.xml").write_text(moved2, encoding="utf-8")
+    code, out = app("--files", src, d / "moved2.xml", "--text", "--no-open")
+    say("moved, same logic" in out and "network added" not in out and "network removed" not in out,
+        "moved networks are listed apart from a real change in the same block", out[-300:])
 
 
 # --- 10. folders, updates, reviews --------------------------------------------------------------

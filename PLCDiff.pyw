@@ -47,7 +47,7 @@ import xml.etree.ElementTree as ET
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 WORK = "<work>"          # marker for "files on disk"
 TEXT_EXT = {".scl", ".stl", ".awl", ".db", ".udt", ".s7dcl", ".s7res", ".txt", ".csv", ".md"}
 GATES = ("or", "and")
@@ -870,6 +870,7 @@ class FileReport:
         self.textdiff = []
         self.error = ""
         self.note = ""      # "renumbered": same export, TIA only renumbered/reordered the parts; "other": see textdiff
+        self.moved = []     # networks with the same logic at another position: [(title, old number, new number)]
 
     @property
     def doc(self):
@@ -1062,10 +1063,28 @@ def align_nets(old, new):
                 block.append((j, nd))
         block.sort(key=lambda x: x[0])
         result.extend(nd for _, nd in block)
+    pair_moved(result)
     for nd in result:
         if nd.status == "changed" and not nd.bullets:
             nd.status = "same"
     return result
+
+
+def pair_moved(result):
+    """A network that only moved shows up as 'removed' in one place and 'added' in another. Pair them again:
+    the same logic → unchanged, marked as moved; the same title with other logic → one changed network."""
+    def pair(match):
+        for r in [x for x in result if x.status == "removed"]:
+            for a in [x for x in result if x.status == "added"]:
+                if match(r.old, a.new):
+                    nd = compare_nets(r.old, a.new)
+                    nd.moved = True
+                    result[result.index(a)] = nd
+                    result.remove(r)
+                    break
+    pair(lambda o, n: o.fingerprint() == n.fingerprint())
+    pair(lambda o, n: bool(o.title) and o.title == n.title and difflib.SequenceMatcher(
+        a=o.fingerprint(), b=n.fingerprint(), autojunk=False).ratio() >= 0.35)
 
 
 def export_lines(data):
@@ -1078,7 +1097,13 @@ def export_lines(data):
 
 
 NOTE_TEXT = {"renumbered": "no logic change - TIA only renumbered the parts inside the export",
+             "moved": "no logic change - networks only moved to another position",
              "other": "nothing the drawing shows changed - only other parts of the export (comments, attributes ...)"}
+
+
+def moved_text(moved, n=8):
+    return ", ".join('%s %d → %d' % ('"%s"' % t if t else "network", a, b) for t, a, b in moved[:n]) + (
+        " … (%d in all)" % len(moved) if len(moved) > n else "")
 
 
 def diff_file(path, status, old_bytes, new_bytes):
@@ -1113,13 +1138,8 @@ def diff_file(path, status, old_bytes, new_bytes):
                 rep.bullets.extend(dict_diff(oi, ni, "interface"))
                 rep.bullets.extend(order_diff(oi, ni, "interface"))
             rep.nets = align_nets(o.nets if o else [], n.nets if n else [])
-            if o and n and not any(x.status != "same" for x in rep.nets):
-                of, nf = [x.fingerprint() for x in o.nets], [x.fingerprint() for x in n.nets]
-                if of != nf and sorted(of) == sorted(nf):            # same networks, other order: runs differently
-                    moved = [x for x in n.nets if of.index(x.fingerprint()) + 1 != x.idx]
-                    rep.bullets.append(("chg", "network order changed: %s" % ", ".join(
-                        "%s now %d (was %d)" % ('"%s"' % x.title if x.title else "network", x.idx, of.index(x.fingerprint()) + 1)
-                        for x in moved[:6]) + (" …" if len(moved) > 6 else "")))
+            rep.moved = [(x.new.title, x.old.idx, x.new.idx) for x in rep.nets   # same logic, another position:
+                         if x.status == "same" and getattr(x, "moved", False)]   # noted, not counted as a change
         elif doc.kind in ("data", "udt"):
             oi, ni = (o.iface if o else OrderedDict()), (n.iface if n else OrderedDict())
             label = "member" if doc.kind == "udt" else "variable"
@@ -1127,7 +1147,9 @@ def diff_file(path, status, old_bytes, new_bytes):
             rep.bullets.extend(order_diff(oi, ni, label))
         elif doc.kind == "tags":
             rep.bullets.extend(tag_diff(o.tags if o else OrderedDict(), n.tags if n else OrderedDict()))
-        if doc.kind == "other" or (o and n and not rep.bullets and not any(x.status != "same" for x in rep.nets)):
+        if o and n and rep.moved and not rep.bullets and not any(x.status != "same" for x in rep.nets):
+            rep.note = "moved"                    # only the position of networks changed
+        elif doc.kind == "other" or (o and n and not rep.bullets and not any(x.status != "same" for x in rep.nets)):
             rep.textdiff = text_lines_diff(old_bytes.decode("utf-8-sig", "replace") if old_bytes else "",
                                            new_bytes.decode("utf-8-sig", "replace") if new_bytes else "")
             if rep.textdiff and doc.kind != "other":
@@ -2018,6 +2040,9 @@ def print_report(meta, reports):
             print("  %s" % net.label())
             for c, t in nd.bullets:
                 print("    %s %s" % (SIGN[c], t))
+        if r.moved:
+            print("  = %s: %s" % ("no logic change - networks only moved" if r.note == "moved" else "moved, same logic",
+                                  moved_text(r.moved)))
         if r.textdiff and not r.bullets and not any(n.status != "same" for n in r.nets):
             adds = sum(1 for l in r.textdiff if l.startswith("+"))
             dels = sum(1 for l in r.textdiff if l.startswith("-"))
@@ -2112,6 +2137,18 @@ border:1px solid var(--line);background:#fff;color:var(--ink);margin:1px}
 .gbox{height:60vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:8px}
 .gbox.gnone{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px;padding:20px;text-align:center}
 .gchg ul.b{margin-top:12px}
+.tpwrap{margin-top:8px;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+table.tpair{width:100%;border-collapse:collapse;table-layout:fixed;font:12px/1.5 Consolas,"Cascadia Mono",monospace;background:#fff}
+table.tpair col.lnc{width:44px}
+table.tpair th{text-align:left;font:600 11px "Segoe UI",sans-serif;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);
+padding:6px 10px;background:#f8fafc;border-bottom:1px solid var(--line)}
+table.tpair th code{font:600 11px Consolas,monospace;text-transform:none;color:var(--ink)}
+table.tpair td{padding:1px 8px;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}
+table.tpair td.ln{color:#94a3b8;text-align:right;user-select:none;border-right:1px solid var(--line)}
+table.tpair td.c+td.ln{border-left:1px solid var(--line)}
+table.tpair td.del{background:#fef2f2}table.tpair td.add{background:#f0fdf4}table.tpair td.none{background:#f8fafc}
+table.tpair td.del mark{background:#fecaca;color:inherit;border-radius:2px}table.tpair td.add mark{background:#bbf7d0;color:inherit;border-radius:2px}
+table.tpair tr.fold td{text-align:center;color:var(--muted);background:#f8fafc;font:italic 12px "Segoe UI",sans-serif;padding:3px}
 .nochange{background:#f0fdf4;border:1px solid #bbf7d0;color:#14532d;border-radius:8px;padding:10px 14px;margin:4px 0 10px;font-size:13px}
 .toc .tg{list-style:none;margin:8px 0 2px -18px;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
 .toc .tools{float:right;font-size:12px}.toc .tools a{color:var(--accent);margin-left:12px;cursor:pointer}
@@ -2198,6 +2235,53 @@ def html_bullets(bullets):
     return '<ul class="b">' + "".join('<li class="%s"><span>%s</span></li>' % (c, esc(t)) for c, t in bullets) + "</ul>"
 
 
+def html_textpair(a, b, meta, ctx=6):
+    """SCL / STL before | after side by side, line by line, changed parts of a line marked; long unchanged runs folded."""
+    def marked(x, y):                         # the changed characters of a replaced line
+        sm = difflib.SequenceMatcher(a=x, b=y, autojunk=False)
+        if sm.ratio() < 0.4:
+            return esc(x), esc(y)
+        l, r = [], []
+        for t, i1, i2, j1, j2 in sm.get_opcodes():
+            l.append(esc(x[i1:i2]) if t == "equal" else "<mark>%s</mark>" % esc(x[i1:i2]) if i2 > i1 else "")
+            r.append(esc(y[j1:j2]) if t == "equal" else "<mark>%s</mark>" % esc(y[j1:j2]) if j2 > j1 else "")
+        return "".join(l), "".join(r)
+
+    def row(i, x, ci, j, y, cj):
+        return ('<tr><td class="ln">%s</td><td class="%s">%s</td><td class="ln">%s</td><td class="%s">%s</td></tr>' % (
+            i or "", ci, x, j or "", cj, y))
+
+    rows = []
+    ops = difflib.SequenceMatcher(a=a, b=b, autojunk=False).get_opcodes()
+    for k, (t, i1, i2, j1, j2) in enumerate(ops):
+        if t == "equal":
+            keep = list(range(i2 - i1))
+            if i2 - i1 > 2 * ctx + 1:
+                head = range(ctx) if k > 0 else range(0)
+                tail = range(i2 - i1 - ctx, i2 - i1) if k < len(ops) - 1 else range(0)
+                keep = list(head) + [None] + list(tail)
+            for d in keep:
+                if d is None:
+                    rows.append('<tr class="fold"><td colspan="4">… %d unchanged lines …</td></tr>' % (
+                        i2 - i1 - len(head) - len(tail)))
+                else:
+                    rows.append(row(i1 + d + 1, esc(a[i1 + d]), "c", j1 + d + 1, esc(b[j1 + d]), "c"))
+            continue
+        L, R = a[i1:i2], b[j1:j2]
+        for d in range(max(len(L), len(R))):
+            x, y = (L[d] if d < len(L) else None), (R[d] if d < len(R) else None)
+            if x is not None and y is not None:
+                mx, my = marked(x, y)
+                rows.append(row(i1 + d + 1, mx, "c del", j1 + d + 1, my, "c add"))
+            elif x is not None:
+                rows.append(row(i1 + d + 1, esc(x), "c del", "", "", "c none"))
+            else:
+                rows.append(row("", "", "c none", j1 + d + 1, esc(y), "c add"))
+    return ('<div class="tpwrap"><table class="tpair"><colgroup><col class="lnc"><col><col class="lnc"><col></colgroup>'
+            '<tr><th colspan="2">Before · <code>%s</code></th><th colspan="2">After · <code>%s</code></th></tr>%s</table></div>'
+            % (esc(meta["old_short"]), esc(meta["new_short"]), "".join(rows)))
+
+
 def html_codediff(lines):
     out = []
     for l in lines:
@@ -2234,6 +2318,8 @@ def html_net(nd, meta):
     if net.is_text:
         if st == "same":
             h.append('<pre class="code">%s</pre>' % esc(net.text))
+        elif st == "changed" and nd.old is not None and nd.new is not None:
+            h.append(html_textpair(nd.old.text.split("\n"), nd.new.text.split("\n"), meta))
         else:
             lines = text_lines_diff(nd.old.text if nd.old else "", nd.new.text if nd.new else "", context=50)
             h.append(html_codediff(lines))
@@ -2394,8 +2480,9 @@ ZOOM_JS = """<script>
     const svg = w.querySelector(':scope > svg'); if (!svg || w.dataset.z) return;
     w.dataset.z = '1';
     const W = +svg.getAttribute('width'), H = +svg.getAttribute('height'), avail = w.clientWidth - 14;
-    if (!W || !avail || (W <= avail && H <= 720)) return;
-    const s = Math.min(avail / W, 640 / H, 1);
+    const seq = !!w.closest('.gwhole');   // only the whole S7-GRAPH sequence is also fitted to the height
+    if (!W || !avail || (W <= avail && (!seq || H <= 720))) return;
+    const s = Math.min(avail / W, seq ? Math.max(640 / H, 0.45) : 1, 1);   // tall networks stay readable: scroll down
     if (s > 0.92) return;
     const pos = el => { const a = el.getBoundingClientRect(), b = svg.getBoundingClientRect(), k = W / b.width;
       return [(a.left - b.left + a.width / 2) * k, (a.top - b.top + a.height / 2) * k]; };
@@ -2695,7 +2782,7 @@ def build_html(meta, reports, show_all):
                 nn = sum(1 for n in r.nets if n.status != "same")
                 extra = "%d network%s" % (nn, "" if nn == 1 else "s") if nn else ""
                 if not extra and not r.bullets and r.note:
-                    extra = "no logic change" if r.note == "renumbered" else "no drawn change"
+                    extra = "no logic change" if r.note in ("renumbered", "moved") else "no drawn change"
                 if r.bullets:
                     extra = ", ".join(x for x in [extra, "%d other change%s" % (len(r.bullets), "" if len(r.bullets) == 1 else "s")] if x)
                 h.append('<li><a href="#f%d">%s</a>%s<span class="count">%s</span></li>' % (
@@ -2730,6 +2817,12 @@ def build_html(meta, reports, show_all):
             tbl = html_member_table(r.old.iface if r.old else None, r.new.iface if r.new else None) \
                 if doc and doc.kind in ("data", "udt") and r.bullets and r.status not in ("A", "D") else ""
             h.append(tbl or html_bullets(r.bullets))
+            if r.moved and r.note == "moved":
+                h.append('<div class="nochange"><b>No logic change.</b> Networks only moved to another position, with '
+                         'the same logic: %s</div>' % esc(moved_text(r.moved)))
+            elif r.moved:
+                h.append('<div class="same-list">Moved to another position, same logic (not counted as a change): %s</div>'
+                         % esc(moved_text(r.moved)))
             same, shown = [], []
             for nd in r.nets:
                 if nd.status == "same" and not show_all:
@@ -3165,7 +3258,9 @@ CREATE TABLE IF NOT EXISTS changes (
     network INTEGER, network_title TEXT, kind TEXT, change TEXT);
 CREATE INDEX IF NOT EXISTS ix_changes_date ON changes(date);
 CREATE INDEX IF NOT EXISTS ix_changes_block ON changes(block);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 """
+HISTORY_FORMAT = "2"     # raise when the rows a commit gives change (2 = 1.4.1: moved networks) - the cache is rebuilt
 KIND_WORD = {"add": "added", "del": "removed", "chg": "changed"}
 
 
@@ -3203,6 +3298,8 @@ def rows_for_report(rep):
         net = nd.new or nd.old
         for c, t in nd.bullets:
             out.append(dict(base, network=net.idx, network_title=net.title, kind=c, change=t))
+    if not out and rep.note == "moved":
+        out.append(dict(base, kind="chg", change="%s: %s" % (NOTE_TEXT["moved"], moved_text(rep.moved))))
     if not out and rep.textdiff:
         a = sum(1 for l in rep.textdiff if l.startswith("+"))
         d = sum(1 for l in rep.textdiff if l.startswith("-"))
@@ -3219,6 +3316,12 @@ def update_history(root, path=".", quiet=False):
     con = sqlite3.connect(str(db_dir / "changes.db"))
     con.execute("PRAGMA foreign_keys = ON")
     con.executescript(SCHEMA)
+    fmt = con.execute("SELECT value FROM meta WHERE key = 'format'").fetchone()
+    if not fmt or fmt[0] != HISTORY_FORMAT:      # rows were made by an older PLC Diff: read every commit again
+        con.execute("DELETE FROM changes")
+        con.execute("DELETE FROM commits")
+        con.execute("INSERT OR REPLACE INTO meta VALUES ('format', ?)", (HISTORY_FORMAT,))
+        con.commit()
     if not rev_ok(root, "HEAD"):
         return con
     log = git(root, "log", "--reverse", "--first-parent", "--format=%H%x00%h%x00%aI%x00%an%x00%s", "HEAD")
@@ -3746,7 +3849,7 @@ def compare_folders(a, b, safety_only=False):
             moved += op != np_
             continue
         rep = diff_file(np_, "R" if st == "M" and op != np_ else st, ob, nb)
-        if rep.bullets or rep.textdiff or rep.error or any(n.status != "same" for n in rep.nets):
+        if rep.bullets or rep.textdiff or rep.error or rep.moved or any(n.status != "same" for n in rep.nets):
             if safety_only and not rep.safety:
                 continue
             reports.append(rep)
@@ -3779,7 +3882,7 @@ def compute_reports(root, old, new, path=".", safety_only=False):
         if ob is not None and nb is not None and ob.replace(b"\r\n", b"\n") == nb.replace(b"\r\n", b"\n"):
             continue
         rep = diff_file(np_, st, ob, nb)
-        if rep.bullets or rep.textdiff or rep.error or any(n.status != "same" for n in rep.nets):
+        if rep.bullets or rep.textdiff or rep.error or rep.moved or any(n.status != "same" for n in rep.nets):
             if safety_only and not rep.safety:
                 continue
             reports.append(rep)
@@ -5871,7 +5974,7 @@ def main(argv=None):
     elif a.files:
         po, pn = Path(a.files[0]), Path(a.files[1])
         rep = diff_file(pn.name, "M", po.read_bytes(), pn.read_bytes())
-        reports = [rep] if (rep.bullets or rep.textdiff or any(n.status != "same" for n in rep.nets)) else []
+        reports = [rep] if (rep.bullets or rep.textdiff or rep.error or rep.moved or any(n.status != "same" for n in rep.nets)) else []
         meta = {"old_short": po.name, "old_desc": "", "new_short": pn.name, "new_desc": "", "repo": pn.stem,
                 "old_label": str(po), "new_label": str(pn), "log": []}
         slug = "files"
@@ -5911,7 +6014,7 @@ def main(argv=None):
             ob = read_rev(root, old, op) if st != "A" else None
             nb = read_rev(root, new, np_) if st != "D" else None
             rep = diff_file(np_, st, ob, nb)
-            if rep.bullets or rep.textdiff or rep.error or any(n.status != "same" for n in rep.nets):
+            if rep.bullets or rep.textdiff or rep.error or rep.moved or any(n.status != "same" for n in rep.nets):
                 reports.append(rep)
         slug = "%s-%s" % (os_, ns)
 
