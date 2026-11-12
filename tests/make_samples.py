@@ -255,6 +255,50 @@ def fbd_fc(new):
                                                                  "<ProgrammingLanguage>FBD</ProgrammingLanguage></AttributeList><ObjectList>")
 
 
+STX = "http://www.siemens.com/automation/Openness/SW/NetworkSource/StructuredText/v4"
+
+
+def scl_text(src):
+    """SCL source text -> StructuredText tokens like TIA writes them ("Tag" -> Access, spaces -> Blank)."""
+    import re
+    out = []
+    for n, line in enumerate(src.split("\n")):
+        if n:
+            out.append('<NewLine Num="1" />')
+        for m in re.finditer(r'"[^"]*"|\s+|//.*|[^\s"]+', line):
+            t = m.group(0)
+            if t.isspace():
+                out.append('<Blank Num="%d" />' % len(t))
+            elif t.startswith("//"):
+                out.append('<LineComment><Text>%s</Text></LineComment>' % t[2:].replace("&", "&amp;").replace("<", "&lt;"))
+            elif t.startswith('"'):
+                out.append('<Access Scope="GlobalVariable"><Symbol><Component Name="%s" /></Symbol></Access>' % t.strip('"'))
+            else:
+                out.append('<Token Text="%s" />' % t.replace("&", "&amp;").replace("<", "&lt;").replace('"', "&quot;"))
+    return '<StructuredText xmlns="%s">%s</StructuredText>' % (STX, "".join(out))
+
+
+def scl_fc(new):
+    """An SCL block: one line changed in the middle, one line added near the end, unchanged lines in between."""
+    lines = ["// Cycle statistics for the station", 'IF "I_Start" AND NOT "I_Stop" THEN', "    #running := TRUE;", "END_IF;",
+             'IF "I_Stop" THEN', "    #running := FALSE;", "END_IF;", "", "// count finished parts",
+             'IF #running AND "I_PartDone" THEN',
+             '    "DB_Stats".Count := "DB_Stats".Count + %s;' % ("2" if new else "1"),
+             "END_IF;", ""]
+    lines += ["// slot %d" % k for k in range(1, 15)]
+    lines += ['"DB_Stats".Average := "DB_Stats".Total / MAX(IN1 := "DB_Stats".Count, IN2 := 1);']
+    if new:
+        lines += ['"Q_Ready" := #running AND NOT "I_Fault";']
+    unit = ('<SW.Blocks.CompileUnit ID="10" CompositionName="CompileUnits"><AttributeList><NetworkSource>%s</NetworkSource>'
+            '<ProgrammingLanguage>SCL</ProgrammingLanguage></AttributeList><ObjectList>%s%s</ObjectList>'
+            '</SW.Blocks.CompileUnit>' % (scl_text("\n".join(lines)), ml("Comment", "", "1C"), ml("Title", "Statistics", "1D")))
+    return ('<?xml version="1.0" encoding="utf-8"?>\n<Document><Engineering version="V20" /><SW.Blocks.FC ID="0"><AttributeList>'
+            '<Interface><Sections xmlns="%s">%s</Sections></Interface><MemoryLayout>Optimized</MemoryLayout>'
+            '<Name>FC_Statistics</Name><Number>30</Number><ProgrammingLanguage>SCL</ProgrammingLanguage></AttributeList>'
+            '<ObjectList>%s%s</ObjectList></SW.Blocks.FC></Document>' % (
+                IFC, iface([("running", "Bool")]), unit, ml("Title", "Statistics", "F3")))
+
+
 GRA = "http://www.siemens.com/automation/Openness/SW/NetworkSource/Graph/v6"
 
 
@@ -333,3 +377,4 @@ if __name__ == "__main__":
     (out / "vci" / "PLC tags" / "Station1_IO.xml").write_text(tags(new), encoding="utf-8")
     (out / "vci" / "Program blocks" / "Station" / "DB_Settings.xml").write_text(db(new), encoding="utf-8")
     (out / "vci" / "Program blocks" / "Station" / "FB_WeldSequence.xml").write_text(graph_fb(new), encoding="utf-8")
+    (out / "vci" / "Program blocks" / "Station" / "FC_Statistics.xml").write_text(scl_fc(new), encoding="utf-8")
